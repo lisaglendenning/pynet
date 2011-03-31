@@ -13,7 +13,7 @@ History
 import unittest
 import random
 
-import io.buffer
+import pynet.io.buffer
 
 #############################################################################
 #############################################################################
@@ -27,7 +27,7 @@ class TestCaseBuffer(unittest.TestCase):
     
     def test_buffer(self):
         for n in [1,2,4]:
-            buf = io.buffer.Buffer(n)
+            buf = pynet.io.buffer.Buffer(n)
             self.assertEqual(len(buf), n)
             for i in [n, n+1]:
                 self.assertRaises(IndexError, buf.__getitem__, i)
@@ -40,11 +40,11 @@ class TestCaseBuffer(unittest.TestCase):
     
     def test_window(self):
         n = 4
-        buf = io.buffer.Buffer(n)
+        buf = pynet.io.buffer.Buffer(n)
         zeros = b'0' * n
         
         buf[:] = zeros
-        win = io.buffer.Window(buf)
+        win = pynet.io.buffer.Window(buf)
         self.assertEqual(len(win), 0)
         self.assertRaises(IndexError, win.__getitem__, 0)
         start = 1
@@ -77,7 +77,7 @@ class TestCaseBuffer(unittest.TestCase):
     
     def test_bufferstream(self):
         n = 1
-        buf = io.buffer.BufferStream(n)
+        buf = pynet.io.buffer.BufferStream(n)
         
         self.assertEqual(len(buf), 0)
         buf.clear()

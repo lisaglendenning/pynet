@@ -11,14 +11,13 @@
 import sys, os
 
 import paver.easy
-import paver.doctools
 import paver.setuputils
 
 
 def configure():
     cwd = os.getcwd()
-    sys.path.insert(0, cwd)
-    package = __import__('source')
+    sys.path.insert(0, os.path.join(cwd, 'source'))
+    package = __import__('pynet')
     del sys.path[0]
     setup = dict(
                  version=package.__version__,
@@ -32,8 +31,8 @@ def configure():
     return setup
 
 paver.setuputils.setup(
-        name='io',
-        packages=['io'],
+        name='pynet',
+        packages=paver.setuputils.find_packages('source'),
         package_dir = {'':'source'},
         **configure())
 
@@ -43,8 +42,9 @@ def sdist():
     """Overrides sdist to make sure that our setup.py is generated."""
     
     # Create distribution manifest
-    includes = ['pavement.py', 'setup.py', 'paver-minilib.zip']
-    lines = ['include %s' % ' '.join(includes),]
+    includes = ['setup.py', 'paver-minilib.zip']
+    lines = ['include %s' % ' '.join(includes),
+             'recursive-include source *.py',]
     with open('MANIFEST.in', 'w') as f:
         f.write('\n'.join(lines))
         f.write('\n')

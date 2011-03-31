@@ -14,7 +14,7 @@ History
 import unittest
 import socket
 
-import io.poll
+import pynet.io.poll
 
 #############################################################################
 #############################################################################
@@ -30,7 +30,7 @@ class TestCasePoll(unittest.TestCase):
         
         def test(poller):
             for sock in socks:
-                poller.register(sock, io.poll.POLLIN | io.poll.POLLOUT)
+                poller.register(sock, pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT)
             
             token = 'hello world'
             
@@ -56,7 +56,7 @@ class TestCasePoll(unittest.TestCase):
                         else:
                             self.fail('%s: %s' % (sock, event))
         
-        poller = io.poll.Poller()
+        poller = pynet.io.poll.Poller()
         with poller:
             test(poller)
 
