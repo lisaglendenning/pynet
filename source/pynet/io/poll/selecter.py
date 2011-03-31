@@ -18,7 +18,7 @@ class Selecter(IPoller):
         self.readables = set()
         self.writables = set()
         self.exceptables = set()
-        return super(Selecter, self).__enter__(self)
+        return super(Selecter, self).__enter__()
 
     def __exit__(self, *args, **kwargs):
         ret = super(Selecter, self).__exit__(self, *args, **kwargs)

@@ -44,12 +44,12 @@ class TestCasePoll(unittest.TestCase):
                 received = False
                 while not (sent and received):
                     for sock, event in poller.poll():
-                        if event == hpoller.POLLIN:
+                        if event == pynet.io.poll.POLLIN:
                             self.assertTrue(sock is socks[j])
                             data, addr = sock.recvfrom(len(token))
                             self.assertEqual(data, token)
                             received = True
-                        elif event == hpoller.POLLOUT:
+                        elif event == pynet.io.poll.POLLOUT:
                             if sock is socks[i] and not sent:
                                 sock.sendto(token, socks[j].getsockname())
                                 sent = True
