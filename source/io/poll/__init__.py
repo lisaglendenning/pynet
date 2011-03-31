@@ -1,5 +1,5 @@
-# @license
 # @copyright
+# @license
 
 r""" Interface to system-dependent file polling.
 

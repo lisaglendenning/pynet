@@ -1,5 +1,5 @@
-# @license
 # @copyright
+# @license
 
 import abc
 

@@ -1,5 +1,5 @@
-# @license
 # @copyright
+# @license
 
 from ipoller import *
 

@@ -1,3 +1,9 @@
 .*
 !.gitignore
 
+*.pyc
+/*.zip
+/dist/
+/MANIFEST.in
+/setup.py
+*.egg-info/
