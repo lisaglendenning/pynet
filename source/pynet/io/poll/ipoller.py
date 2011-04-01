@@ -14,6 +14,10 @@ POLLEX, POLLIN, POLLOUT, POLLHUP = EVENTS
 ##############################################################################
 
 class IPoller(object):
+    r"""
+    Registered objects must either be integer file descriptors, or
+    be hashable objects with a fileno() method that returns a file descriptor.
+    """
     __metaclass__ = abc.ABCMeta
 
     registry = None
@@ -32,39 +36,31 @@ class IPoller(object):
         return self
 
     def __exit__(self, *args, **kwargs):
-        for obj in self.registered():
-            self.unregister(obj)
+        for fd in self.registry.values():
+            self.unregister(fd)
         self.registry = None
         return False
     
-    def register(self, obj, events):
-        fd = self.get_fileno(obj)
+    def register(self, fd, events):
         if fd in self.registry:
-            raise ValueError(obj)
+            raise ValueError(fd)
         self.registry[fd] = events
-        return fd
     
-    def modify(self, obj, events):
-        fd = self.get_fileno(obj)
+    def modify(self, fd, events):
         if fd not in self.registry:
-            raise ValueError(obj)
-        self.registry[fd] = events
-        return fd
+            raise ValueError(fd)
+        if events != self.registry[fd]:
+            self.registry[fd] = events
     
-    def unregister(self, obj):
-        fd = self.get_fileno(obj)
+    def unregister(self, fd):
         if fd not in self.registry:
-            raise ValueError(obj)
+            raise ValueError(fd)
         del self.registry[fd]
-        return fd
-
-    def registered(self):
-        return self.registry.values()
     
     @abc.abstractmethod
     def poll(self, timeout=0.0):
         r"""
-        timeout: seconds
+        timeout: seconds (float)
         """
         pass
 

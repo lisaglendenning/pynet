@@ -27,17 +27,16 @@ class Selecter(IPoller):
         self.exceptables = None
         return ret
 
-    def register(self, obj, events):
-        fd = super(Selecter, self).register(obj, events)
+    def register(self, fd, events):
+        super(Selecter, self).register(fd, events)
         for flag, group in ((POLLIN, self.readables), (POLLOUT, self.writables),):
             if flag & events:
                 group.add(fd)
         if fd in self.readables or fd in self.writables:
             self.exceptables.add(fd)
-        return fd
 
-    def modify(self, obj, events):
-        fd = super(Selecter, self).modify(obj, events)
+    def modify(self, fd, events):
+        super(Selecter, self).modify(fd, events)
         for flag, group in ((POLLIN, self.readables), (POLLOUT, self.writables),):
             if flag & events:
                 if fd not in group:
@@ -51,21 +50,19 @@ class Selecter(IPoller):
         else:
             if fd in self.exceptables:
                 self.exceptables.remove(fd)
-        return fd
     
-    def unregister(self, obj):
-        fd = super(Selecter, self).unregister(obj)
+    def unregister(self, fd):
+        super(Selecter, self).unregister(fd)
         for group in (self.readables, self.writables, self.exceptables,):
             if fd in group:
                 group.remove(fd)
-        return fd
     
     def poll(self, timeout=0.0):
         # must be sequences of integers or objects with fileno()
         rs = self.readables
         ws = self.writables
         xs = self.exceptables
-        
+    
         # acceptance of three empty sequences is platform-dependent
         if not (rs or ws or xs):
             return

@@ -29,9 +29,6 @@ class TestCasePoll(unittest.TestCase):
             socks[i].bind((HOST, PORT + i))
         
         def test(poller):
-            for sock in socks:
-                poller.register(sock, pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT)
-            
             token = 'hello world'
             
             for i in xrange(NSOCKS):
@@ -43,21 +40,24 @@ class TestCasePoll(unittest.TestCase):
                 sent = False
                 received = False
                 while not (sent and received):
-                    for fd, event in poller.poll():
+                    for sock, event in poller.poll():
                         if event == pynet.io.poll.POLLIN:
-                            self.assertEqual(fd, socks[j].fileno())
-                            data, addr = socks[j].recvfrom(len(token))
+                            self.assertTrue(sock is socks[j])
+                            data, addr = sock.recvfrom(len(token))
                             self.assertEqual(data, token)
                             received = True
                         elif event == pynet.io.poll.POLLOUT:
-                            if fd == socks[i].fileno() and not sent:
-                                socks[i].sendto(token, socks[j].getsockname())
+                            if sock is socks[i] and not sent:
+                                sock.sendto(token, socks[j].getsockname())
                                 sent = True
                         else:
-                            self.fail('%s: %s' % (fd, event))
+                            self.fail('%s: %s' % (sock, event))
         
         poller = pynet.io.poll.Poller()
         with poller:
+            for sock in socks:
+                poller.register(sock, pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT)
+            
             test(poller)
 
 #############################################################################
