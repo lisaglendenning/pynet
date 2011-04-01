@@ -59,16 +59,15 @@ class Poller(IPoller):
         events = self.poller.poll(timeout)
         
         for fd, flags in events:
-            obj = self.registry[fd]
             if not (flags & (select.POLLIN | select.POLLPRI | select.POLLOUT | select.POLLHUP)):
-                yield (obj, POLLEX,)
+                yield (fd, POLLEX,)
             else:
                 if flags & (select.POLLIN | select.POLLPRI):
-                    yield (obj, POLLIN,)
+                    yield (fd, POLLIN,)
                 if flags & select.POLLOUT:
-                    yield (obj, POLLOUT,)
+                    yield (fd, POLLOUT,)
                 if flags & select.POLLHUP:
-                    yield (obj, POLLHUP,)
+                    yield (fd, POLLHUP,)
 
 ##############################################################################
 ##############################################################################

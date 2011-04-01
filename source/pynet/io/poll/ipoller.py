@@ -41,13 +41,14 @@ class IPoller(object):
         fd = self.get_fileno(obj)
         if fd in self.registry:
             raise ValueError(obj)
-        self.registry[fd] = obj
+        self.registry[fd] = events
         return fd
     
     def modify(self, obj, events):
         fd = self.get_fileno(obj)
         if fd not in self.registry:
             raise ValueError(obj)
+        self.registry[fd] = events
         return fd
     
     def unregister(self, obj):

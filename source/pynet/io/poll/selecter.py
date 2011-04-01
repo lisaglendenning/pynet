@@ -74,7 +74,7 @@ class Selecter(IPoller):
 
         for event, fds in ((POLLIN, r), (POLLOUT, w), (POLLEX, x),):
             for fd in fds:
-                yield (self.registry[fd], event,)
+                yield (fd, event,)
 
 #############################################################################
 #############################################################################

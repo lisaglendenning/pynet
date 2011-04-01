@@ -43,18 +43,18 @@ class TestCasePoll(unittest.TestCase):
                 sent = False
                 received = False
                 while not (sent and received):
-                    for sock, event in poller.poll():
+                    for fd, event in poller.poll():
                         if event == pynet.io.poll.POLLIN:
-                            self.assertTrue(sock is socks[j])
-                            data, addr = sock.recvfrom(len(token))
+                            self.assertEqual(fd, socks[j].fileno())
+                            data, addr = socks[j].recvfrom(len(token))
                             self.assertEqual(data, token)
                             received = True
                         elif event == pynet.io.poll.POLLOUT:
-                            if sock is socks[i] and not sent:
-                                sock.sendto(token, socks[j].getsockname())
+                            if fd == socks[i].fileno() and not sent:
+                                socks[i].sendto(token, socks[j].getsockname())
                                 sent = True
                         else:
-                            self.fail('%s: %s' % (sock, event))
+                            self.fail('%s: %s' % (fd, event))
         
         poller = pynet.io.poll.Poller()
         with poller:
