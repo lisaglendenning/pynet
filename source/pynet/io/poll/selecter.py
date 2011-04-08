@@ -8,54 +8,49 @@ import select
 ##############################################################################
 ##############################################################################
 
-class Selecter(IPoller):
+class Poller(IPoller):
     
     readables = None
     writables = None
     exceptables = None
         
-    def __enter__(self):
+    def __init__(self):
+        super(Poller, self).__init__()
         self.readables = set()
         self.writables = set()
         self.exceptables = set()
-        return super(Selecter, self).__enter__()
 
-    def __exit__(self, *args, **kwargs):
-        ret = super(Selecter, self).__exit__(self, *args, **kwargs)
-        self.readables = None
-        self.writables = None
-        self.exceptables = None
-        return ret
-
-    def register(self, fd, events):
-        super(Selecter, self).register(fd, events)
+    def __setitem__(self, fd, events):
+        if fd in self:
+            old = self[fd]
+            added = events & ~old
+            removed = old & ~events
+        else:
+            added = events
+            removed = 0
         for flag, group in ((POLLIN, self.readables), (POLLOUT, self.writables),):
-            if flag & events:
+            if flag & added:
                 group.add(fd)
-        if fd in self.readables or fd in self.writables:
-            self.exceptables.add(fd)
-
-    def modify(self, fd, events):
-        super(Selecter, self).modify(fd, events)
-        for flag, group in ((POLLIN, self.readables), (POLLOUT, self.writables),):
-            if flag & events:
-                if fd not in group:
-                    group.add(fd)
-            else:
-                if fd in group:
-                    group.remove(fd)
+            elif flag & removed:
+                group.remove(fd)
         if fd in self.readables or fd in self.writables:
             if fd not in self.exceptables:
                 self.exceptables.add(fd)
         else:
             if fd in self.exceptables:
                 self.exceptables.remove(fd)
+        super(Poller, self).__setitem__(fd, events)
     
-    def unregister(self, fd):
-        super(Selecter, self).unregister(fd)
-        for group in (self.readables, self.writables, self.exceptables,):
-            if fd in group:
-                group.remove(fd)
+    def __delitem__(self, fd):
+        if fd not in self:
+            raise KeyError(fd)
+        old = self[fd]
+        if old:
+            for flag, group in ((POLLIN, self.readables), (POLLOUT, self.writables),):
+                if flag & old:
+                    group.remove(fd)
+            self.exceptables.remove(fd)
+        super(Poller, self).__delitem__(fd)
     
     def poll(self, timeout=0.0):
         # must be sequences of integers or objects with fileno()

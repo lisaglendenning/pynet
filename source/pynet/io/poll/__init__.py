@@ -23,13 +23,13 @@ Poller = None
 
 if hasattr(select, 'epoll'):
     import epoller
-    Poller = epoller.EPoller
+    Poller = epoller.Poller
 elif hasattr(select, 'poll'):
     import poller
     Poller = poller.Poller
 elif hasattr(select, 'select'):
     import selecter
-    Poller = selecter.Selecter
+    Poller = selecter.Poller
 else:
     raise RuntimeError(select)
 

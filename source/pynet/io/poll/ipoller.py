@@ -2,25 +2,24 @@
 # @license
 
 import abc
+import collections
 
 ##############################################################################
 ##############################################################################
 
 # IO event types
-EVENTS = range(4)
-POLLEX, POLLIN, POLLOUT, POLLHUP = EVENTS
+EVENTS = [2**i for i in xrange(4)]
+POLLIN, POLLOUT, POLLHUP, POLLEX, = EVENTS
 
 ##############################################################################
 ##############################################################################
 
-class IPoller(object):
+class IPoller(collections.MutableMapping):
     r"""
     Registered objects must either be integer file descriptors, or
     be hashable objects with a fileno() method that returns a file descriptor.
     """
     __metaclass__ = abc.ABCMeta
-
-    registry = None
 
     @classmethod
     def get_fileno(cls, obj):
@@ -30,32 +29,34 @@ class IPoller(object):
         if not isinstance(fd, int):
             raise TypeError(obj)
         return fd
-
-    def __enter__(self):
+    
+    def __init__(self):
         self.registry = {}
+
+    def __getitem__(self, fd):
+        return self.registry[fd]
+
+    def __setitem__(self, fd, events):
+        self.registry[fd] = events
+        
+    def __delitem__(self, fd):
+        if fd not in self:
+            raise KeyError(fd)
+        del self.registry[fd]
+    
+    def __len__(self):
+        return len(self.registry)
+    
+    def __iter__(self):
+        for k in self.registry:
+            yield k
+            
+    def __enter__(self):
         return self
 
     def __exit__(self, *args, **kwargs):
-        for fd in self.registry.values():
-            self.unregister(fd)
-        self.registry = None
+        self.clear()
         return False
-    
-    def register(self, fd, events):
-        if fd in self.registry:
-            raise ValueError(fd)
-        self.registry[fd] = events
-    
-    def modify(self, fd, events):
-        if fd not in self.registry:
-            raise ValueError(fd)
-        if events != self.registry[fd]:
-            self.registry[fd] = events
-    
-    def unregister(self, fd):
-        if fd not in self.registry:
-            raise ValueError(fd)
-        del self.registry[fd]
     
     @abc.abstractmethod
     def poll(self, timeout=0.0):

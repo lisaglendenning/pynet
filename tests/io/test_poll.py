@@ -56,8 +56,7 @@ class TestCasePoll(unittest.TestCase):
         poller = pynet.io.poll.Poller()
         with poller:
             for sock in socks:
-                poller.register(sock, pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT)
-            
+                poller[sock] = pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT
             test(poller)
 
 #############################################################################

@@ -8,52 +8,37 @@ import select
 ##############################################################################
 ##############################################################################
 
-class EPoller(IPoller):
+class Poller(IPoller):
     r"""
     Uses level-triggering
     """
     
     poller = None
     
-    def __enter__(self):
+    def __init__(self):
+        super(Poller, self).__init__()
         self.poller = select.epoll()
-        return super(EPoller, self).__enter__()
         
     def __exit__(self, *args, **kwargs):
-        ret = super(EPoller, self).__exit__(self, *args, **kwargs)
+        ret = super(Poller, self).__exit__(self, *args, **kwargs)
         self.poller.close()
-        self.poller = None
         return ret
-    
-    def register(self, obj, events):
-        fd = super(EPoller, self).register(obj, events)
+
+    def __setitem__(self, fd, events):
         flags = 0
         if POLLIN & events:
             flags |= select.EPOLLIN | select.EPOLLPRI
         if POLLOUT & events:
             flags |= select.EPOLLOUT
-        if flags:
+        if fd in self:
+            self.poller.modify(fd, flags)
+        else:
             self.poller.register(fd, flags)
-        return fd
+        super(Poller, self).__setitem__(fd, events)
     
-    def modify(self, obj, events):
-        fd = super(EPoller, self).modify(obj, events)
-        flags = 0
-        if POLLIN & events:
-            flags |= select.EPOLLIN | select.EPOLLPRI
-        if POLLOUT & events:
-            flags |= select.EPOLLOUT
-        if flags:
-            try:
-                self.poller.modify(fd, flags)
-            except IOError:
-                self.poller.register(fd, flags)
-        return fd
-    
-    def unregister(self, obj):
-        fd = super(EPoller, self).unregister(obj)
+    def __delitem__(self, fd):
+        super(Poller, self).__delitem__(fd)
         self.poller.unregister(fd)
-        return fd
 
     def poll(self, timeout=0.0):
         events = self.poll.poll(timeout)

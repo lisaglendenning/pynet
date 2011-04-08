@@ -12,44 +12,25 @@ class Poller(IPoller):
     
     poller = None
     
-    def __enter__(self):
+    def __init__(self):
+        super(Poller, self).__init__()
         self.poller = select.poll()
-        return super(Poller, self).__enter__()
 
-    def __exit__(self, *args, **kwargs):
-        ret = super(Poller, self).__exit__(self, *args, **kwargs)
-        self.poller = None
-        return ret
-    
-    def register(self, obj, events):
-        fd = super(Poller, self).register(obj, events)
+    def __setitem__(self, fd, events):
         flags = 0
         if POLLIN & events:
             flags |= select.POLLIN | select.POLLPRI
         if POLLOUT & events:
             flags |= select.POLLOUT
-        if flags:
+        if fd in self:
+            self.poller.modify(fd, flags)
+        else:
             self.poller.register(fd, flags)
-        return fd
+        super(Poller, self).__setitem__(fd, events)
     
-    def modify(self, obj, events):
-        fd = super(Poller, self).modify(obj, events)
-        flags = 0
-        if POLLIN & events:
-            flags |= select.POLLIN | select.POLLPRI
-        if POLLOUT & events:
-            flags |= select.POLLOUT
-        if flags:
-            try:
-                self.poller.modify(fd, flags)
-            except IOError:
-                self.poller.register(fd, flags)
-        return fd
-    
-    def unregister(self, obj):
-        fd = super(Poller, self).unregister(obj)
+    def __delitem__(self, fd):
+        super(Poller, self).__delitem__(fd)
         self.poller.unregister(fd)
-        return fd
 
     def poll(self, timeout=0.0):
         
