@@ -121,7 +121,7 @@ class PollInput(NamesCondition):
                     poller[fd] = changes[fd]
         return registry
 
-    def __rshift__(self, other):
+    def pull(self, other):
         return other
 
 #############################################################################
@@ -129,7 +129,7 @@ class PollInput(NamesCondition):
 
 class PollOutput(NamesCondition):
         
-    def __lshift__(self, other):
+    def push(self, other):
         for fd, events in other.marking.iteritems():
             if fd in self.marking:
                 self.marking[fd] |= events
@@ -137,7 +137,7 @@ class PollOutput(NamesCondition):
                 self.marking[fd] = events
         return other
     
-    def __rshift__(self, other):
+    def pull(self, other):
         for fd, events in other.marking.iteritems():
             if fd in self.marking:
                 events = self.marking[fd] & ~(events)
@@ -153,13 +153,17 @@ class PollTransition(pypetri.net.Transition):
     
     Marking = NamesMarking
     
-    def enabled(self, event):
+    def peek(self):
         poller = PollInput.POLLER
-        for flow in event.flows:
-            if poller not in flow.marking \
-              or flow.marking[poller] is None:
-                return False
-        return True
+        for event in super(PollTransition, self).peek():
+            if not event.flows:
+                continue
+            for flow in event.flows:
+                if poller not in flow.marking \
+                  or flow.marking[poller] is None:
+                    break
+            else:
+                yield event
 
     def __call__(self, event):
         outputs = self.Event(transition=self,)

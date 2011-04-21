@@ -29,8 +29,8 @@ class TestCasePoll(unittest.TestCase):
         sock.bind((HOST, PORT))
         
         net.input.registry[sock] = pynet.io.poll.POLLOUT
-        enabled = [e for e in net.search()]
-        self.assertTrue(len(enabled) == 1)
+        enabled = [e for e in net.peek()]
+        self.assertEqual(len(enabled), 1)
         self.assertFalse(net.output.marking)
         output = net(enabled[0])
         self.assertTrue(net.output.marking)
