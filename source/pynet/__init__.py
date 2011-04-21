@@ -8,6 +8,6 @@ __url__ = ''
 __author__ = 'Lisa Glendenning'
 __author_email__ = 'author@lisa.glendenning.name'
 __license__ = 'MIT/X'
-__keywords__ = ['io']
-__requires__ = []
-
+__keywords__ = ['socket', 'io']
+__requires__ = ['pypetri']
+__extras__ = {}
