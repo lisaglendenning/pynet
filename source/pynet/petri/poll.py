@@ -1,7 +1,7 @@
 
-import collections
+import operator
 
-import pypetri.trellis as trellis
+from pypetri import trellis
 
 import pypetri.net
 
@@ -10,67 +10,38 @@ import pynet.io.poll
 #############################################################################
 #############################################################################
 
-class NamesMarking(collections.MutableMapping, pypetri.net.Marking):
-
-    def __init__(self, names=None, *args, **kwargs):
-        super(NamesMarking, self).__init__(*args, **kwargs)
-        self.names = trellis.Dict(names) if names else trellis.Dict()
-
-    def __getitem__(self, name):
-        return self.names[name]
-
-    def __setitem__(self, name, value):
-        self.names[name] = value
-        
-    def __delitem__(self, name):
-        del self.names[name]
-    
-    def __len__(self):
-        return len(self.names)
-    
-    def __iter__(self):
-        for k in self.names:
-            yield k
-    
-    def __add__(self, other):
-        return self.update(other)
-    
-    def __radd__(self, other):
-        if other:
-            return other + self
-        return self
-    
-    def __sub__(self, other):
-        if other:
-            for k in other:
-                if k in self:
-                    del self[k]
-        return self
-
-    def __rsub__(self, other):
-        if other:
-            return other - self
-        return self
-        
-    def __nonzero__(self):
-        return len(self) > 0
-
-#############################################################################
-#############################################################################
-
-class NamesCondition(pypetri.net.Condition):
-    
-    Marking = NamesMarking
+class Assignment(pypetri.net.Condition):
     
     def __init__(self, marking=None, *args, **kwargs):
         if marking is None:
-            marking = self.Marking()
-        super(NamesCondition, self).__init__(*args, marking=marking, **kwargs)
+            marking = trellis.Dict()
+        else:
+            marking = trellis.Dict(marking)
+        super(Assignment, self).__init__(*args, marking=marking, **kwargs)
         
+    @trellis.modifier
+    def send(self, marking=None):
+        if marking is not None:
+            self.marking.update(marking)
+        return marking
+
+    @trellis.modifier
+    def pop(self, marking=None):
+        if marking is not None:
+            for k in marking:
+                if k in self.marking:
+                    del self.marking[k]
+        return marking
+
+    def next(self):
+        marking = self.marking
+        if marking:
+            yield self.Event(operator.getitem, marking,)
+
 #############################################################################
 #############################################################################
 
-class PollInput(NamesCondition):
+class PollInput(Assignment):
     
     POLLER = 'poller'
     REGISTRY = 'registry'
@@ -88,13 +59,13 @@ class PollInput(NamesCondition):
             return None
         updated = None
         previous = self.poller
-        names = self.marking.names
+        marking = self.marking
         k = self.POLLER
-        if k in names.added:
-            updated = names.added[k]
-        elif k in names.changed:
-            updated = names.changed[k]
-        elif k not in names.deleted:
+        if k in marking.added:
+            updated = marking.added[k]
+        elif k in marking.changed:
+            updated = marking.changed[k]
+        elif k not in marking.deleted:
             updated = previous
         if updated is not previous:
             if previous is not None:
@@ -107,11 +78,11 @@ class PollInput(NamesCondition):
     def registry(self):
         if self.marking is None:
             return None
-        names = self.marking.names
+        marking = self.marking
         k = self.REGISTRY
-        if k not in names:
+        if k not in marking:
             return None
-        registry = names[k]
+        registry = marking[k]
         poller = self.poller
         if poller is not None:
             for fd in registry.deleted:
@@ -121,94 +92,85 @@ class PollInput(NamesCondition):
                     poller[fd] = changes[fd]
         return registry
 
-    def pull(self, other):
-        return other
-
 #############################################################################
 #############################################################################
 
-class PollOutput(NamesCondition):
+class PollOutput(Assignment):
         
-    def push(self, other):
-        for fd, events in other.marking.iteritems():
-            if fd in self.marking:
-                self.marking[fd] |= events
-            else:
-                self.marking[fd] = events
-        return other
-    
-    def pull(self, other):
-        for fd, events in other.marking.iteritems():
-            if fd in self.marking:
-                events = self.marking[fd] & ~(events)
-                if events:
-                    self.marking[fd] = events
+    @trellis.modifier
+    def send(self, marking=None):
+        if marking is not None:
+            for fd, events in marking.iteritems():
+                if fd in self.marking:
+                    self.marking[fd] |= events
                 else:
-                    del self.marking[fd]
+                    self.marking[fd] = events
+        return marking
     
+    @trellis.modifier
+    def pop(self, marking=None):
+        if marking is not None:
+            for fd, events in marking.iteritems():
+                if fd in self.marking:
+                    events = self.marking[fd] & ~(events)
+                    if events:
+                        self.marking[fd] = events
+                    else:
+                        del self.marking[fd]
+        return marking
+    
+    def next(self):
+        marking = self.marking
+        if marking:
+            yield self.Event(self.pop,)
+
 #############################################################################
 #############################################################################
 
 class PollTransition(pypetri.net.Transition):
-    
-    Marking = NamesMarking
-    
-    def peek(self):
-        poller = PollInput.POLLER
-        for event in super(PollTransition, self).peek():
-            if not event.flows:
-                continue
-            for flow in event.flows:
-                if poller not in flow.marking \
-                  or flow.marking[poller] is None:
-                    break
-            else:
-                yield event
 
-    def __call__(self, event):
-        outputs = self.Event(transition=self,)
+    @trellis.modifier
+    def send(self, thunks, outputs=None):
+        if outputs is None:
+            outputs = self.outputs
         events = {}
-        for flow in event.flows:
-            poller = flow.marking[PollInput.POLLER]
+        for thunk in thunks:
+            poller = thunk(PollInput.POLLER)
             for fd, event in poller.poll():
                 if fd not in events:
                     events[fd] = event
                 else:
                     events[fd] |= event
-        marking = self.Marking(names=events)
-        outgoing = [o.output.output for o in self.outputs if o.connected]
-        for arc in outgoing:
-            output = self.Flow(arc=arc, marking=marking)
-            outputs.add(output)
-        return outputs
+        for output in outputs:
+            output.send(events)
+        return events
 
 #############################################################################
 #############################################################################
 
 class PollChain(pypetri.net.Network):
-    
-    CONDITIONS = ('input', 'output',)
-    TRANSITIONS = ('poll',)
-    
-    @classmethod
-    def create(cls, *args, **kwargs):
-        self = cls(*args, **kwargs)
-        self.zip(self.CONDITIONS, self.TRANSITIONS)
+
+    def __new__(cls, *args, **kwargs):
+        self = super(PollChain, cls).__new__(cls, *args, **kwargs)
+        self.input = PollInput()
+        self.output = PollOutput()
+        self.poll = PollTransition()
+        chain = (self.input, self.poll, self.output,)
+        self.vertices.update(chain)
+        for arc in self.link(chain):
+            pass
         return self
-    
-    def __init__(self, *args, **kwargs):
-        super(PollChain, self).__init__(*args, **kwargs)
-        for name, type in zip(self.CONDITIONS, (PollInput, PollOutput,),):
-            condition = type(name=name)
-            self.add(condition)
-        for name, type in zip(self.TRANSITIONS, (PollTransition,),):
-            transition = type(name=name)
-            self.add(transition)
-    
-    # any way to do this programmatically?
-    input = property(lambda self: self[self.CONDITIONS[0]])
-    output = property(lambda self: self[self.CONDITIONS[-1]])
-    poll = property(lambda self: self[self.TRANSITIONS[0]])
-    
+
+    def next(self, vertices=None, *args, **kwargs):
+        if vertices is None:
+            vertices = self.poll,
+        for event in super(PollChain, self).next(vertices, *args, **kwargs):
+            yield event
+                
+#############################################################################
+#############################################################################
+
+Network = PollChain
+
 #############################################################################
 #############################################################################
