@@ -10,92 +10,14 @@ import pynet.io.poll
 #############################################################################
 #############################################################################
 
-class Assignment(pypetri.net.Condition):
+class Flags(pypetri.net.Condition):
     
     def __init__(self, marking=None, *args, **kwargs):
         if marking is None:
             marking = trellis.Dict()
         else:
             marking = trellis.Dict(marking)
-        super(Assignment, self).__init__(*args, marking=marking, **kwargs)
-        
-    @trellis.modifier
-    def send(self, marking=None):
-        if marking is not None:
-            self.marking.update(marking)
-        return marking
-
-    @trellis.modifier
-    def pop(self, marking=None):
-        if marking is not None:
-            for k in marking:
-                if k in self.marking:
-                    del self.marking[k]
-        return marking
-
-    def next(self):
-        marking = self.marking
-        if marking:
-            yield self.Event(operator.getitem, marking,)
-
-#############################################################################
-#############################################################################
-
-class PollInput(Assignment):
-    
-    POLLER = 'poller'
-    REGISTRY = 'registry'
-    
-    def __init__(self, poller=None, *args, **kwargs):
-        super(PollInput, self).__init__(*args, **kwargs)
-        if poller is None:
-            poller = pynet.io.poll.Poller()
-        self.marking[self.POLLER] = poller
-        self.marking[self.REGISTRY] = trellis.Dict()
-    
-    @trellis.maintain
-    def poller(self):
-        if self.marking is None:
-            return None
-        updated = None
-        previous = self.poller
-        marking = self.marking
-        k = self.POLLER
-        if k in marking.added:
-            updated = marking.added[k]
-        elif k in marking.changed:
-            updated = marking.changed[k]
-        elif k not in marking.deleted:
-            updated = previous
-        if updated is not previous:
-            if previous is not None:
-                previous.__exit__()
-            if updated is not None:
-                updated.__enter__()
-        return updated
-
-    @trellis.maintain
-    def registry(self):
-        if self.marking is None:
-            return None
-        marking = self.marking
-        k = self.REGISTRY
-        if k not in marking:
-            return None
-        registry = marking[k]
-        poller = self.poller
-        if poller is not None:
-            for fd in registry.deleted:
-                del poller[fd]
-            for changes in registry.added, registry.changed,:
-                for fd in changes:
-                    poller[fd] = changes[fd]
-        return registry
-
-#############################################################################
-#############################################################################
-
-class PollOutput(Assignment):
+        super(Flags, self).__init__(*args, marking=marking, **kwargs)
         
     @trellis.modifier
     def send(self, marking=None):
@@ -118,16 +40,66 @@ class PollOutput(Assignment):
                     else:
                         del self.marking[fd]
         return marking
-    
+
     def next(self):
         marking = self.marking
         if marking:
-            yield self.Event(self.pop,)
+            yield self.Event(operator.getitem, marking,)
 
 #############################################################################
 #############################################################################
 
-class PollTransition(pypetri.net.Transition):
+class Poller(Flags):
+    
+    POLLER = 'poller'
+    REGISTRY = 'marking'
+    
+    poller = trellis.attr(None)
+    
+    def __init__(self, poller=None, *args, **kwargs):
+        if poller is None:
+            poller = pynet.io.poll.Poller()
+        super(Poller, self).__init__(*args, poller=poller, **kwargs)
+    
+    @trellis.maintain
+    def poller_context(self):
+        previous = self.poller_context
+        updated = self.poller
+        if updated is not previous:
+            if previous is not None:
+                previous.__exit__()
+            if updated is not None:
+                updated.__enter__()
+        return updated
+
+    @trellis.maintain
+    def registry(self):
+        registry = self.marking
+        poller = self.poller_context
+        if None not in (poller, registry,):
+            for fd in registry.deleted:
+                if fd in poller:
+                    del poller[fd]
+            for changes in registry.added, registry.changed,:
+                for fd in changes:
+                    poller[fd] = changes[fd]
+            for fd in registry:
+                if fd in registry.deleted or fd in registry.added or fd in registry.changed:
+                    continue
+                if fd not in poller:
+                    poller[fd] = registry[fd]
+        return registry
+
+    def next(self):
+        marking = self.marking
+        poller = self.poller
+        if marking and poller:
+            yield self.Event(poller.poll,)
+            
+#############################################################################
+#############################################################################
+
+class Poll(pypetri.net.Transition):
 
     @trellis.modifier
     def send(self, thunks, outputs=None):
@@ -135,8 +107,7 @@ class PollTransition(pypetri.net.Transition):
             outputs = self.outputs
         events = {}
         for thunk in thunks:
-            poller = thunk(PollInput.POLLER)
-            for fd, event in poller.poll():
+            for fd, event in thunk():
                 if fd not in events:
                     events[fd] = event
                 else:
@@ -148,13 +119,15 @@ class PollTransition(pypetri.net.Transition):
 #############################################################################
 #############################################################################
 
-class PollChain(pypetri.net.Network):
+class Polling(pypetri.net.Network):
+
+    Condition = Flags
 
     def __new__(cls, *args, **kwargs):
-        self = super(PollChain, cls).__new__(cls, *args, **kwargs)
-        self.input = PollInput()
-        self.output = PollOutput()
-        self.poll = PollTransition()
+        self = super(Polling, cls).__new__(cls, *args, **kwargs)
+        self.input = Poller()
+        self.output = Flags()
+        self.poll = Poll()
         chain = (self.input, self.poll, self.output,)
         self.vertices.update(chain)
         for arc in self.link(chain):
@@ -164,13 +137,13 @@ class PollChain(pypetri.net.Network):
     def next(self, vertices=None, *args, **kwargs):
         if vertices is None:
             vertices = self.poll,
-        for event in super(PollChain, self).next(vertices, *args, **kwargs):
+        for event in super(Polling, self).next(vertices, *args, **kwargs):
             yield event
                 
 #############################################################################
 #############################################################################
 
-Network = PollChain
+Network = Polling
 
 #############################################################################
 #############################################################################
