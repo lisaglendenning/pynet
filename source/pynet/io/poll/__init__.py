@@ -15,9 +15,11 @@ http://scotdoyle.com/python-epoll-howto.html
 
 """
 
+from __future__ import absolute_import
+
 import select
 
-from ipoller import *
+from .ipoller import *
 
 Poller = None
 

@@ -122,23 +122,104 @@ class Poll(pypetri.net.Transition):
 class Polling(pypetri.net.Network):
 
     Condition = Flags
+    
+    input = trellis.attr(None)
+    output = trellis.attr(None)
+    polling = trellis.attr(None)
+    
+    def __init__(self, input=None, output=None, polling=None, *args, **kwargs):
+        if input is None:
+            input = Poller()
+        if output is None:
+            output = Flags()
+        if polling is None:
+            polling = Poll()
+        super(Polling, self).__init__(*args, input=input, output=output, polling=polling, **kwargs)
 
-    def __new__(cls, *args, **kwargs):
-        self = super(Polling, cls).__new__(cls, *args, **kwargs)
-        self.input = Poller()
-        self.output = Flags()
-        self.poll = Poll()
-        chain = (self.input, self.poll, self.output,)
-        self.vertices.update(chain)
-        for arc in self.link(chain):
-            pass
-        return self
-
-    def next(self, vertices=None, *args, **kwargs):
-        if vertices is None:
-            vertices = self.poll,
-        for event in super(Polling, self).next(vertices, *args, **kwargs):
-            yield event
+    @trellis.maintain(initially=None)
+    def input_changed(self): # FIXME: DRY
+        previous = self.input_changed
+        updated = self.input
+        if previous is not updated and previous is not None:
+            if previous in self.vertices:
+                self.vertices.remove(previous)
+            previous.inputs.clear()
+            previous.outputs.clear()
+        if updated is not None:
+            if updated not in self.vertices:
+                self.vertices.add(updated)
+        return updated
+    
+    @trellis.maintain(initially=None)
+    def output_changed(self): # FIXME: DRY
+        previous = self.output_changed
+        updated = self.output
+        if previous is not updated and previous is not None:
+            if previous in self.vertices:
+                self.vertices.remove(previous)
+            previous.inputs.clear()
+            previous.outputs.clear()
+        if updated is not None:
+            if updated not in self.vertices:
+                self.vertices.add(updated)
+        return updated
+                
+    @trellis.maintain(initially=None)
+    def polling_changed(self): # FIXME: DRY
+        previous = self.polling_changed
+        updated = self.polling
+        if previous is not updated and previous is not None:
+            if previous in self.vertices:
+                self.vertices.remove(previous)
+            previous.inputs.clear()
+            previous.outputs.clear()
+        if updated is not None:
+            if updated not in self.vertices:
+                self.vertices.add(updated)
+        return updated
+    
+    
+    @trellis.maintain(initially=None)
+    def connect(self): # FIXME: DRY
+        input = self.input_changed
+        polling = self.polling_changed
+        output = self.output_changed
+        if polling is not None:
+            if input is not None:
+                for i in polling.inputs:
+                    if i.input is input:
+                        break
+                else:
+                    for i in polling.inputs:
+                        if i.input is None:
+                            input.outputs.add(i)
+                    else:
+                        self.link(input, polling)
+            if output is not None:
+                for o in polling.outputs:
+                    if o.output is output:
+                        break
+                else:
+                    for o in polling.outputs:
+                        if o.output is None:
+                            output.inputs.add(o)
+                    else:
+                        self.link(polling, output)
+        return polling
+                
+    @trellis.maintain(initially=None)
+    def poll(self):
+        polling = self.connect
+        input = self.input_changed
+        output = self.output_changed
+        if None in (polling, input, output):
+            return None
+        events = [e for e in polling.next(inputs=(input,))]
+        if not events:
+            return None
+        assert len(events) == 1
+        return events[0]
+        
                 
 #############################################################################
 #############################################################################
