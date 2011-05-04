@@ -120,39 +120,38 @@ class Poller(Flags):
             poller = poll.Poller()
         super(Poller, self).__init__(*args, poller=poller, **kwargs)
 
-    @trellis.maintain
-    def registry(self):
+    @trellis.perform
+    def register(self): # reads self.marking, writes self.poller
         poller = self.poller
         values = self.marking.values
         if values.added or values.changed or values.deleted:
             for change, changes in zip((self.ADDED, self.CHANGED, self.REMOVED,), 
                                        (values.added, values.changed, values.deleted,),):
                 for k in changes:
-                    undo = None
+#                    undo = None
                     if change in (self.ADDED, self.CHANGED,):
-                        if k in poller:
-                            undo = (poller.__setitem__, k, poller[k],)
-                        else:
-                            undo = (poller.__delitem__, k,)
+#                        if k in poller:
+#                            undo = (poller.__setitem__, k, poller[k],)
+#                        else:
+#                            undo = (poller.__delitem__, k,)
                         poller[k] = changes[k]
                     else: # change == self.REMOVED:
-                        if k in poller:
-                            undo = (poller.__setitem__, k, poller[k],)
+#                        if k in poller:
+#                            undo = (poller.__setitem__, k, poller[k],)
                         del poller[k]
-                    if undo:
-                        trellis.on_undo(*undo)
-            trellis.mark_dirty()
-        return self.poller
+#                    if undo:
+#                        trellis.on_undo(*undo)
+#            trellis.mark_dirty()
+#        return self.poller
 
     def next(self):
         if self.poll is not None:
             yield self.poll
             
-    @trellis.maintain
+    @trellis.compute
     def poll(self):
-        poller = self.registry
-        if poller:
-            return self.Event(poller.poll)
+        if len(self) > 0:
+            return self.Event(self.poller.poll)
         return None
         
 #############################################################################

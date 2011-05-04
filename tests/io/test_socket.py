@@ -83,7 +83,6 @@ class TestCaseSocket(unittest.TestCase):
 
         for connector, acceptor in zip(connectors, acceptors):
             for sock in acceptor, connector:
-                print sock, sock.local, sock.remote
                 sock.socket.settimeout(timeout)
                 sock.shutdown()
                 self.assertTrue(sock.state in (recver.CLOSING, recver.CLOSED,))
