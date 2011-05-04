@@ -28,17 +28,17 @@ class TestCasePoll(unittest.TestCase):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        net.input.marking[sock] = pynet.io.poll.POLLOUT
+        net.input[sock] = pynet.io.poll.POLLOUT
         events = [e for e in net.polling.next()]
         self.assertEqual(len(events), 1)
         self.assertTrue(net.poll is not None)
         
-        self.assertFalse(net.output.marking)
+        self.assertFalse(net.output)
         output = net.poll()
-        self.assertTrue(net.output.marking)
-        self.assertTrue(sock in net.output.marking)
-        self.assertTrue(net.output.marking[sock] & pynet.io.poll.POLLOUT)
-        self.assertTrue(net.output.marking == output)
+        self.assertTrue(net.output)
+        self.assertTrue(sock in net.output)
+        self.assertTrue(net.output[sock] & pynet.io.poll.POLLOUT)
+        self.assertEqual(dict(net.output), dict(output))
         
 #############################################################################
 #############################################################################

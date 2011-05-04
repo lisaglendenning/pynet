@@ -1,9 +1,11 @@
 # @copyright
 # @license
 
-from ipoller import *
+from __future__ import absolute_import
 
-import select
+from .ipoll import *
+
+import select as pyselect
 
 ##############################################################################
 ##############################################################################
@@ -17,7 +19,7 @@ class Poller(IPoller):
     
     def __init__(self):
         super(Poller, self).__init__()
-        self.poller = select.epoll()
+        self.poller = pyselect.epoll()
         
     def __exit__(self, *args, **kwargs):
         ret = super(Poller, self).__exit__(self, *args, **kwargs)
@@ -27,9 +29,9 @@ class Poller(IPoller):
     def __setitem__(self, fd, events):
         flags = 0
         if POLLIN & events:
-            flags |= select.EPOLLIN | select.EPOLLPRI
+            flags |= pyselect.EPOLLIN | pyselect.EPOLLPRI
         if POLLOUT & events:
-            flags |= select.EPOLLOUT
+            flags |= pyselect.EPOLLOUT
         if fd in self:
             self.poller.modify(fd, flags)
         else:
@@ -44,14 +46,14 @@ class Poller(IPoller):
         events = self.poll.poll(timeout)
         
         for fd, flags in events:
-            if not (flags & (select.EPOLLIN | select.EPOLLPRI | select.EPOLLOUT | select.EPOLLHUP)):
+            if not (flags & (pyselect.EPOLLIN | pyselect.EPOLLPRI | pyselect.EPOLLOUT | pyselect.EPOLLHUP)):
                 yield (fd, POLLEX,)
             else:
-                if flags & (select.EPOLLIN | select.EPOLLPRI):
+                if flags & (pyselect.EPOLLIN | pyselect.EPOLLPRI):
                     yield (fd, POLLIN,)
-                if flags & select.EPOLLOUT:
+                if flags & pyselect.EPOLLOUT:
                     yield (fd, POLLOUT,)
-                if flags & select.EPOLLHUP:
+                if flags & pyselect.EPOLLHUP:
                     yield (fd, POLLHUP,)
 
 ##############################################################################

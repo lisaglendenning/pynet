@@ -17,21 +17,16 @@ http://scotdoyle.com/python-epoll-howto.html
 
 from __future__ import absolute_import
 
-import select
+import select as pyselect
 
-from .ipoller import *
+from .ipoll import *
 
-Poller = None
-
-if hasattr(select, 'epoll'):
-    import epoller
-    Poller = epoller.Poller
-elif hasattr(select, 'poll'):
-    import poller
-    Poller = poller.Poller
-elif hasattr(select, 'select'):
-    import selecter
-    Poller = selecter.Poller
+if hasattr(pyselect, 'epoll'):
+    from .epoll import *
+elif hasattr(pyselect, 'poll'):
+    from .poll import *
+elif hasattr(pyselect, 'select'):
+    from .select import *
 else:
-    raise RuntimeError(select)
+    raise RuntimeError(pyselect)
 

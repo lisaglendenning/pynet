@@ -1,9 +1,11 @@
 # @copyright
 # @license
 
-from ipoller import *
+from __future__ import absolute_import
 
-import select
+from .ipoll import *
+
+import select as pyselect
 
 ##############################################################################
 ##############################################################################
@@ -62,7 +64,7 @@ class Poller(IPoller):
         if not (rs or ws or xs):
             return
         
-        r, w, x = select.select(rs, ws, xs, timeout)
+        r, w, x = pyselect.select(rs, ws, xs, timeout)
 
         for event, fds in ((POLLIN, r), (POLLOUT, w), (POLLEX, x),):
             for fd in fds:

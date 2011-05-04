@@ -70,9 +70,11 @@ class Socket(trellis.Component):
         state = self.state
         if sock is not None and state not in (self.START, self.CLOSED, self.ERROR):
             try:
-                return sock.getsockname()
+                addr = sock.getsockname()
             except IOError:
                 pass
+            else:
+                return addr
         return None
     
     @trellis.maintain(initially=None)
@@ -81,9 +83,11 @@ class Socket(trellis.Component):
         state = self.state
         if sock is not None and state not in (self.START, self.CLOSED, self.ERROR):
             try:
-                return sock.getpeername()
+                addr = sock.getpeername()
             except IOError:
                 pass
+            else:
+                return addr
         return None
     
     @trellis.maintain(initially=None)
@@ -132,7 +136,13 @@ class DatagramSocket(Socket):
         def wrapper(*args, **kwargs):
             result = self.catches(f)(*args, **kwargs)
             if self.state == self.START:
-                self.state = self.CONNECTED
+                try:
+                    addr = self.socket.getsockname()
+                except IOError:
+                    pass
+                else:
+                    if addr is not None and addr != self.NONE:
+                        self.state = self.CONNECTED
             return result
         return wrapper
     
@@ -214,7 +224,13 @@ class StreamSocket(Socket):
         def wrapper(*args, **kwargs):
             result = self.catches(f)(*args, **kwargs)
             if self.state == self.CONNECTING:
-                self.state = self.CONNECTED
+                try:
+                    addr = self.socket.getpeername()
+                except IOError:
+                    pass
+                else:
+                    if addr is not None and addr != self.NONE:
+                        self.state = self.CONNECTED
             return result
         return wrapper
 
@@ -226,7 +242,13 @@ class StreamSocket(Socket):
         def wrapper(*args, **kwargs):
             result = self.catches(f)(*args, **kwargs)
             if self.state == self.CONNECTING:
-                self.state = self.CONNECTED
+                try:
+                    addr = self.socket.getpeername()
+                except IOError:
+                    pass
+                else:
+                    if addr is not None and addr != self.NONE:
+                        self.state = self.CONNECTED
             return result
         return wrapper
 
@@ -238,7 +260,13 @@ class StreamSocket(Socket):
         def wrapper(*args, **kwargs):
             result = self.catches(f)(*args, **kwargs)
             if self.state == self.CONNECTING:
-                self.state = self.CONNECTED
+                try:
+                    addr = self.socket.getpeername()
+                except IOError:
+                    pass
+                else:
+                    if addr is not None and addr != self.NONE:
+                        self.state = self.CONNECTED
             return result
         return wrapper
 
@@ -250,7 +278,13 @@ class StreamSocket(Socket):
         def wrapper(*args, **kwargs):
             result = self.catches(f)(*args, **kwargs)
             if self.state == self.CONNECTING:
-                self.state = self.CONNECTED
+                try:
+                    addr = self.socket.getpeername()
+                except IOError:
+                    pass
+                else:
+                    if addr is not None and addr != self.NONE:
+                        self.state = self.CONNECTED
             return result
         return wrapper
     

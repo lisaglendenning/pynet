@@ -1,44 +1,106 @@
 
+from __future__ import absolute_import
+
+import collections
 import operator
 
 from pypetri import trellis
+import peak.events.collections
 
 import pypetri.net
 
-import pynet.io.poll
+from .. import mapping
+
+from ..io import poll
 
 #############################################################################
 #############################################################################
 
-class Flags(pypetri.net.Condition):
-    
+class Flags(pypetri.net.Condition, collections.MutableMapping,):
+
+    # FIXME: do programmatically
+    ADDED = mapping.Mapping.ADDED
+    CHANGED = mapping.Mapping.CHANGED
+    REMOVED = mapping.Mapping.REMOVED
+    CHANGES = mapping.Mapping.CHANGES
+
     def __init__(self, marking=None, *args, **kwargs):
-        if marking is None:
-            marking = trellis.Dict()
+        if marking:
+            marking = mapping.Mapping(marking)
         else:
-            marking = trellis.Dict(marking)
-        super(Flags, self).__init__(*args, marking=marking, **kwargs)
+            marking = mapping.Mapping()
+        pypetri.net.Condition.__init__(self, *args, marking=marking, **kwargs)
+    
+    @trellis.maintain
+    def __hash__(self):
+        return self.marking.__hash__
+    
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.marking == other.marking
+    
+    @trellis.maintain
+    def __len__(self,):
+        return self.marking.__len__
+
+    @trellis.maintain
+    def __iter__(self,):
+        return self.marking.__iter__
+    
+    @trellis.maintain
+    def __getitem__(self,):
+        return self.marking.__getitem__
+
+    @trellis.maintain
+    def __delitem__(self,):
+        return self.marking.__delitem__
+
+    @trellis.maintain
+    def __setitem__(self,):
+        return self.marking.__setitem__
         
+    @trellis.modifier
+    def unset(self, k, flags=None):
+        if k in self:
+            current = self[k]
+            if flags is None:
+                result = 0
+            elif flags:
+                result = current & ~(flags)
+            if result:
+                self[k] = result
+            else:
+                del self[k]
+
+    @trellis.modifier
+    def set(self, k, flags=0):
+        if k in self and flags:
+            self[k] = self[k] | flags
+        else:
+            self[k] = flags
+
+    def isset(self, k, flags=0):
+        if flags and k in self:
+            return self[k] & flags
+        return False
+
+    @trellis.maintain
+    def changes(self):
+        return self.marking.changes
+            
     @trellis.modifier
     def send(self, marking=None):
         if marking is not None:
-            for fd, events in marking.iteritems():
-                if fd in self.marking:
-                    self.marking[fd] |= events
-                else:
-                    self.marking[fd] = events
+            for k, flags in marking.iteritems():
+                self.set(k, flags)
         return marking
     
     @trellis.modifier
     def pop(self, marking=None):
         if marking is not None:
-            for fd, events in marking.iteritems():
-                if fd in self.marking:
-                    events = self.marking[fd] & ~(events)
-                    if events:
-                        self.marking[fd] = events
-                    else:
-                        del self.marking[fd]
+            for k, flags in marking.iteritems():
+                self.unset(k, flags)
         return marking
 
     def next(self):
@@ -58,7 +120,7 @@ class Poller(Flags):
     
     def __init__(self, poller=None, *args, **kwargs):
         if poller is None:
-            poller = pynet.io.poll.Poller()
+            poller = poll.Poller()
         super(Poller, self).__init__(*args, poller=poller, **kwargs)
     
     @trellis.maintain
@@ -72,30 +134,45 @@ class Poller(Flags):
                 updated.__enter__()
         return updated
 
-    @trellis.maintain
+    @trellis.maintain(initially=None)
+    def changes(self):
+        return self.marking.changes
+
+    @trellis.maintain(initially=None)
     def registry(self):
-        registry = self.marking
         poller = self.poller_context
-        if None not in (poller, registry,):
-            for fd in registry.deleted:
-                if fd in poller:
-                    del poller[fd]
-            for changes in registry.added, registry.changed,:
-                for fd in changes:
-                    poller[fd] = changes[fd]
-            for fd in registry:
-                if fd in registry.deleted or fd in registry.added or fd in registry.changed:
-                    continue
-                if fd not in poller:
-                    poller[fd] = registry[fd]
-        return registry
+        values = self.marking.values
+        if values.added or values.changed or values.deleted:
+            for change, changes in zip((self.ADDED, self.CHANGED, self.REMOVED,), 
+                                       (values.added, values.changed, values.deleted,),):
+                for k in changes:
+                    undo = None
+                    if change in (self.ADDED, self.CHANGED,):
+                        if k in poller:
+                            undo = (poller.__setitem__, (k, poller[k]))
+                        else:
+                            undo = (poller.__delitem__, (k,))
+                        poller[k] = changes[k]
+                    else: # change == self.REMOVED:
+                        if k in poller:
+                            undo = (poller.__setitem__, (k, poller[k]))
+                        del poller[k]
+                    if undo:
+                        trellis.on_undo(*undo)
+            trellis.mark_dirty()
+        return poller
 
     def next(self):
-        marking = self.marking
-        poller = self.poller
-        if marking and poller:
-            yield self.Event(poller.poll,)
+        if self.poll is not None:
+            yield self.poll
             
+    @trellis.maintain
+    def poll(self):
+        poller = self.registry
+        if poller:
+            return self.Event(poller.poll)
+        return None
+        
 #############################################################################
 #############################################################################
 

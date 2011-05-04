@@ -1,5 +1,5 @@
-# @license
 # @copyright
+# @license
 
 r"""Buffered abstraction for a socket.
 
