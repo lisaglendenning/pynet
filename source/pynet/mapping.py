@@ -4,7 +4,6 @@
 from __future__ import absolute_import
 
 import collections
-import operator
 
 from peak.events import trellis
 from peak.events import collections as pcollections
@@ -23,11 +22,9 @@ class Mapping(collections.MutableMapping, trellis.Component):
     values = trellis.make(trellis.Dict)
     
     def __init__(self, values=None, *args, **kwargs):
+        trellis.Component.__init__(self, *args, **kwargs)
         if values:
-            values = trellis.Dict(values)
-        else:
-            values = trellis.Dict()
-        trellis.Component.__init__(self, *args, values=values, **kwargs)
+            self.values.update(values)
 
     def __hash__(self):
         return object.__hash__(self.values)
@@ -58,7 +55,7 @@ class Mapping(collections.MutableMapping, trellis.Component):
         return self.values.__setitem__
 
     @trellis.maintain(initially=None)
-    def changes(self): # reads self.values, writes hub
+    def changes(self): # reads self.values, writes self.changes
         hub = self.changes
         if hub is None:
             hub = pcollections.Hub()

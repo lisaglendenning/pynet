@@ -23,13 +23,13 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
     CHANGED = mapping.Mapping.CHANGED
     REMOVED = mapping.Mapping.REMOVED
     CHANGES = mapping.Mapping.CHANGES
+    
+    marking = trellis.make(mapping.Mapping)
 
     def __init__(self, marking=None, *args, **kwargs):
+        pypetri.net.Condition.__init__(self, *args, **kwargs)
         if marking:
-            marking = mapping.Mapping(marking)
-        else:
-            marking = mapping.Mapping()
-        pypetri.net.Condition.__init__(self, *args, marking=marking, **kwargs)
+            self.marking.update(marking)
     
     @trellis.compute
     def __hash__(self):
@@ -62,10 +62,7 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
         
     @trellis.compute
     def changes(self):
-        try:
-            return self.marking.changes
-        except AttributeError:
-            return None
+        return self.marking.changes
     
     @trellis.modifier
     def unset(self, k, flags=None):
@@ -94,14 +91,14 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
             
     @trellis.modifier
     def send(self, marking=None):
-        if marking is not None:
+        if marking:
             for k, flags in marking.iteritems():
                 self.set(k, flags)
         return marking
     
     @trellis.modifier
     def pop(self, marking=None):
-        if marking is not None:
+        if marking:
             for k, flags in marking.iteritems():
                 self.unset(k, flags)
         return marking
@@ -109,7 +106,7 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
     def next(self):
         marking = self.marking
         if marking:
-            yield self.Event(operator.getitem, marking,)
+            yield self.Event(self.pop, marking,)
 
 #############################################################################
 #############################################################################
@@ -126,9 +123,9 @@ class Poller(Flags):
     @trellis.compute
     def __getitem__(self): # value read may be inconsistent during a rule
         return self.poller.__getitem__
-
+    
     @trellis.perform
-    def register(self): # reads self.marking, writes self.poller
+    def update(self): # reads self.marking and writes self.poller
         values = self.marking.values
         if values.added or values.changed or values.deleted:
             poller = self.poller
@@ -169,7 +166,20 @@ class Poll(pypetri.net.Transition):
         for output in outputs:
             output.send(events)
         return events
-
+    
+    @trellis.compute
+    def poll(self):
+        polls = []
+        for i in self.inputs:
+            if i.input is None:
+                continue
+            if i.input.poll is not None:
+                polls.append(i.input.poll)
+        if polls:
+            return self.Event(self.send, polls)
+        else:
+            return None
+    
 #############################################################################
 #############################################################################
 
@@ -177,102 +187,55 @@ class Polling(pypetri.net.Network):
 
     Condition = Flags
     
-    input = trellis.attr(None)
-    output = trellis.attr(None)
-    polling = trellis.attr(None)
+    input = trellis.make(Poller)
+    output = trellis.make(Flags)
+    polling = trellis.make(Poll)
     
-    def __init__(self, input=None, output=None, polling=None, *args, **kwargs):
-        if input is None:
-            input = Poller()
-        if output is None:
-            output = Flags()
-        if polling is None:
-            polling = Poll()
-        super(Polling, self).__init__(*args, input=input, output=output, polling=polling, **kwargs)
+    @trellis.maintain(initially=None)
+    def incoming(self): # FIXME: DRY
+        incoming = self.incoming
+        input = self.input
+        output = self.polling
+        for v in input, output,:
+            if v not in self.vertices:
+                self.vertices.add(v)
+        links = input.outputs & output.inputs
+        if links:
+            if incoming is not None and input not in links:
+                incoming = None
+            if incoming is None:
+                for link in links:
+                    if link.input is input and link.output is output:
+                        incoming = link
+                        break
+        if incoming is None:
+            incoming = self.link(input, output)
+        return incoming
 
     @trellis.maintain(initially=None)
-    def input_changed(self): # FIXME: DRY
-        previous = self.input_changed
-        updated = self.input
-        if previous is not updated and previous is not None:
-            if previous in self.vertices:
-                self.vertices.remove(previous)
-            previous.inputs.clear()
-            previous.outputs.clear()
-        if updated is not None:
-            if updated not in self.vertices:
-                self.vertices.add(updated)
-        return updated
-    
-    @trellis.maintain(initially=None)
-    def output_changed(self): # FIXME: DRY
-        previous = self.output_changed
-        updated = self.output
-        if previous is not updated and previous is not None:
-            if previous in self.vertices:
-                self.vertices.remove(previous)
-            previous.inputs.clear()
-            previous.outputs.clear()
-        if updated is not None:
-            if updated not in self.vertices:
-                self.vertices.add(updated)
-        return updated
-                
-    @trellis.maintain(initially=None)
-    def polling_changed(self): # FIXME: DRY
-        previous = self.polling_changed
-        updated = self.polling
-        if previous is not updated and previous is not None:
-            if previous in self.vertices:
-                self.vertices.remove(previous)
-            previous.inputs.clear()
-            previous.outputs.clear()
-        if updated is not None:
-            if updated not in self.vertices:
-                self.vertices.add(updated)
-        return updated
-    
-    
-    @trellis.maintain(initially=None)
-    def connect(self): # FIXME: DRY
-        input = self.input_changed
-        polling = self.polling_changed
-        output = self.output_changed
-        if polling is not None:
-            if input is not None:
-                for i in polling.inputs:
-                    if i.input is input:
+    def outgoing(self): # FIXME: DRY
+        outgoing = self.outgoing
+        input = self.polling
+        output = self.output
+        for v in input, output,:
+            if v not in self.vertices:
+                self.vertices.add(v)
+        links = input.outputs & output.inputs
+        if links:
+            if outgoing is not None and input not in links:
+                outgoing = None
+            if outgoing is None:
+                for link in links:
+                    if link.input is input and link.output is output:
+                        outgoing = link
                         break
-                else:
-                    for i in polling.inputs:
-                        if i.input is None:
-                            input.outputs.add(i)
-                    else:
-                        self.link(input, polling)
-            if output is not None:
-                for o in polling.outputs:
-                    if o.output is output:
-                        break
-                else:
-                    for o in polling.outputs:
-                        if o.output is None:
-                            output.inputs.add(o)
-                    else:
-                        self.link(polling, output)
-        return polling
+        if outgoing is None:
+            outgoing = self.link(input, output)
+        return outgoing
                 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def poll(self):
-        polling = self.connect
-        input = self.input_changed
-        output = self.output_changed
-        if None in (polling, input, output):
-            return None
-        events = [e for e in polling.next(inputs=(input,))]
-        if not events:
-            return None
-        assert len(events) == 1
-        return events[0]
+        return self.polling.poll
         
                 
 #############################################################################
