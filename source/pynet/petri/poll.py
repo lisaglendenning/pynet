@@ -31,7 +31,7 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
             marking = mapping.Mapping()
         pypetri.net.Condition.__init__(self, *args, marking=marking, **kwargs)
     
-    @trellis.maintain
+    @trellis.compute
     def __hash__(self):
         return self.marking.__hash__
     
@@ -40,29 +40,32 @@ class Flags(pypetri.net.Condition, collections.MutableMapping,):
             return False
         return self.marking == other.marking
     
-    @trellis.maintain
+    @trellis.compute
     def __len__(self,):
         return self.marking.__len__
 
-    @trellis.maintain
+    @trellis.compute
     def __iter__(self,):
         return self.marking.__iter__
     
-    @trellis.maintain
+    @trellis.compute
     def __getitem__(self,):
         return self.marking.__getitem__
 
-    @trellis.maintain
+    @trellis.compute
     def __delitem__(self,):
         return self.marking.__delitem__
 
-    @trellis.maintain
+    @trellis.compute
     def __setitem__(self,):
         return self.marking.__setitem__
         
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def changes(self):
-        return self.marking.changes
+        try:
+            return self.marking.changes
+        except AttributeError:
+            return None
     
     @trellis.modifier
     def unset(self, k, flags=None):
@@ -119,30 +122,23 @@ class Poller(Flags):
         if poller is None:
             poller = poll.Poller()
         super(Poller, self).__init__(*args, poller=poller, **kwargs)
+    
+    @trellis.compute
+    def __getitem__(self): # value read may be inconsistent during a rule
+        return self.poller.__getitem__
 
     @trellis.perform
     def register(self): # reads self.marking, writes self.poller
-        poller = self.poller
         values = self.marking.values
         if values.added or values.changed or values.deleted:
+            poller = self.poller
             for change, changes in zip((self.ADDED, self.CHANGED, self.REMOVED,), 
                                        (values.added, values.changed, values.deleted,),):
                 for k in changes:
-#                    undo = None
                     if change in (self.ADDED, self.CHANGED,):
-#                        if k in poller:
-#                            undo = (poller.__setitem__, k, poller[k],)
-#                        else:
-#                            undo = (poller.__delitem__, k,)
                         poller[k] = changes[k]
-                    else: # change == self.REMOVED:
-#                        if k in poller:
-#                            undo = (poller.__setitem__, k, poller[k],)
+                    else: # change == self.REMOVED
                         del poller[k]
-#                    if undo:
-#                        trellis.on_undo(*undo)
-#            trellis.mark_dirty()
-#        return self.poller
 
     def next(self):
         if self.poll is not None:

@@ -37,28 +37,28 @@ class Mapping(collections.MutableMapping, trellis.Component):
             return False
         return self.values is other.values
     
-    @trellis.maintain
+    @trellis.compute
     def __len__(self,):
         return self.values.__len__
 
-    @trellis.maintain
+    @trellis.compute
     def __iter__(self,):
         return self.values.__iter__
     
-    @trellis.maintain
+    @trellis.compute
     def __getitem__(self,):
         return self.values.__getitem__
 
-    @trellis.maintain
+    @trellis.compute
     def __delitem__(self,):
         return self.values.__delitem__
 
-    @trellis.maintain
+    @trellis.compute
     def __setitem__(self,):
         return self.values.__setitem__
 
     @trellis.maintain(initially=None)
-    def changes(self):
+    def changes(self): # reads self.values, writes hub
         hub = self.changes
         if hub is None:
             hub = pcollections.Hub()
