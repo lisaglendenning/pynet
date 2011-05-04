@@ -3,9 +3,13 @@
 
 from __future__ import absolute_import
 
-from .ipoll import *
+from .ipoll import IPoller, POLLIN, POLLOUT, POLLEX, POLLHUP
 
-import pyselect as pypyselect
+from select import poll as epoll
+from select import POLLIN as EPOLLIN
+from select import POLLPRI as EPOLLPRI
+from select import POLLOUT as EPOLLOUT
+from select import POLLHUP as EPOLLHUP
 
 ##############################################################################
 ##############################################################################
@@ -16,14 +20,18 @@ class Poller(IPoller):
     
     def __init__(self):
         super(Poller, self).__init__()
-        self.poller = pyselect.poll()
+        self.poller = epoll()
+    
+    def __del__(self):
+        self.clear()
+        super(Poller, self).__del__()
 
     def __setitem__(self, fd, events):
         flags = 0
         if POLLIN & events:
-            flags |= pyselect.POLLIN | pyselect.POLLPRI
+            flags |= EPOLLIN | EPOLLPRI
         if POLLOUT & events:
-            flags |= pyselect.POLLOUT
+            flags |= EPOLLOUT
         if fd in self:
             self.poller.modify(fd, flags)
         else:
@@ -42,14 +50,14 @@ class Poller(IPoller):
         events = self.poller.poll(timeout)
         
         for fd, flags in events:
-            if not (flags & (pyselect.POLLIN | pyselect.POLLPRI | pyselect.POLLOUT | pyselect.POLLHUP)):
+            if not (flags & (EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLHUP)):
                 yield (fd, POLLEX,)
             else:
-                if flags & (pyselect.POLLIN | pyselect.POLLPRI):
+                if flags & (EPOLLIN | EPOLLPRI):
                     yield (fd, POLLIN,)
-                if flags & pyselect.POLLOUT:
+                if flags & EPOLLOUT:
                     yield (fd, POLLOUT,)
-                if flags & pyselect.POLLHUP:
+                if flags & EPOLLHUP:
                     yield (fd, POLLHUP,)
 
 ##############################################################################

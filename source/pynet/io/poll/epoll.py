@@ -3,9 +3,9 @@
 
 from __future__ import absolute_import
 
-from .ipoll import *
+from .ipoll import IPoller, POLLIN, POLLOUT, POLLEX, POLLHUP
 
-import select as pyselect
+from select import epoll, EPOLLIN, EPOLLPRI, EPOLLOUT, EPOLLHUP
 
 ##############################################################################
 ##############################################################################
@@ -19,19 +19,19 @@ class Poller(IPoller):
     
     def __init__(self):
         super(Poller, self).__init__()
-        self.poller = pyselect.epoll()
+        self.poller = epoll()
         
-    def __exit__(self, *args, **kwargs):
-        ret = super(Poller, self).__exit__(self, *args, **kwargs)
+    def __del__(self,):
+        self.clear()
         self.poller.close()
-        return ret
+        super(Poller, self).__del__()
 
     def __setitem__(self, fd, events):
         flags = 0
         if POLLIN & events:
-            flags |= pyselect.EPOLLIN | pyselect.EPOLLPRI
+            flags |= EPOLLIN | EPOLLPRI
         if POLLOUT & events:
-            flags |= pyselect.EPOLLOUT
+            flags |= EPOLLOUT
         if fd in self:
             self.poller.modify(fd, flags)
         else:
@@ -46,14 +46,14 @@ class Poller(IPoller):
         events = self.poll.poll(timeout)
         
         for fd, flags in events:
-            if not (flags & (pyselect.EPOLLIN | pyselect.EPOLLPRI | pyselect.EPOLLOUT | pyselect.EPOLLHUP)):
+            if not (flags & (EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLHUP)):
                 yield (fd, POLLEX,)
             else:
-                if flags & (pyselect.EPOLLIN | pyselect.EPOLLPRI):
+                if flags & (EPOLLIN | EPOLLPRI):
                     yield (fd, POLLIN,)
-                if flags & pyselect.EPOLLOUT:
+                if flags & EPOLLOUT:
                     yield (fd, POLLOUT,)
-                if flags & pyselect.EPOLLHUP:
+                if flags & EPOLLHUP:
                     yield (fd, POLLHUP,)
 
 ##############################################################################

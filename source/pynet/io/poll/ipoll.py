@@ -1,6 +1,8 @@
 # @copyright
 # @license
 
+from __future__ import absolute_import
+
 import abc
 import collections
 
@@ -50,14 +52,7 @@ class IPoller(collections.MutableMapping):
     def __iter__(self):
         for k in self.registry:
             yield k
-            
-    def __enter__(self):
-        return self
 
-    def __exit__(self, *args, **kwargs):
-        self.clear()
-        return False
-    
     @abc.abstractmethod
     def poll(self, timeout=0.0):
         r"""

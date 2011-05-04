@@ -3,7 +3,7 @@
 
 from __future__ import absolute_import
 
-from .ipoll import *
+from .ipoll import IPoller, POLLIN, POLLOUT, POLLEX, POLLHUP
 
 import select as pyselect
 

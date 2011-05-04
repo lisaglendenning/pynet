@@ -54,10 +54,9 @@ class TestCasePoll(unittest.TestCase):
                             self.fail('%s: %s' % (sock, event))
         
         poller = pynet.io.poll.Poller()
-        with poller:
-            for sock in socks:
-                poller[sock] = pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT
-            test(poller)
+        for sock in socks:
+            poller[sock] = pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT
+        test(poller)
 
 #############################################################################
 #############################################################################
