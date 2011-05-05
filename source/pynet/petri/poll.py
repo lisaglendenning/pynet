@@ -184,6 +184,12 @@ class Poll(pypetri.net.Transition):
 #############################################################################
 
 class Polling(pypetri.net.Network):
+    
+    POLLIN = poll.POLLIN
+    POLLOUT = poll.POLLOUT
+    POLLHUP = poll.POLLHUP
+    POLLEX = poll.POLLEX
+    EVENTS = poll.EVENTS
 
     Condition = Flags
     

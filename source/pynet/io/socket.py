@@ -33,8 +33,8 @@ class Socket(trellis.Component):
     ERROR = 'ERROR'
     STATES = [START, CONNECTING, CONNECTED, LISTENING, CLOSING, CLOSED, ERROR,]
     
-    socket = trellis.make(None)
-    state = trellis.attr(None)
+    socket = trellis.make(socket.socket)
+    state = trellis.attr(START)
     
     def __init__(self, sock=None, state=None, **options):
         if sock is None:
@@ -48,8 +48,18 @@ class Socket(trellis.Component):
             state = self.START
         super(Socket, self).__init__(socket=sock, state=state)
     
+    @trellis.compute
     def __hash__(self):
-        return hash(self.socket)
+        return self.socket.__hash__
+    
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.socket == other.socket
+    
+    @trellis.compute
+    def fileno(self):
+        return self.socket.fileno
     
     def catches(self, f):
         @functools.wraps(f)
