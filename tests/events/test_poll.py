@@ -14,8 +14,8 @@ History
 import unittest
 import socket
 
-from pynet.mapping import *
-from pynet.petri.poll import *
+from pynet.events.dispatch import *
+from pynet.events.poll import *
 
 #############################################################################
 #############################################################################
@@ -26,15 +26,14 @@ class TestCasePoll(unittest.TestCase):
         poller = Polling()
         
         registered = []
-        poller.registry.register(MatchAny, lambda x: registered.append(x))
+        poller.registry[MatchAny] = lambda x: registered.append(x)
         events = []
-        poller.events.register(MatchAny, lambda x: events.append(x))
+        poller.events[MatchAny] = lambda x: events.append(x)
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        input = { sock: POLLOUT, }
-        poller.update(input)
+        poller[sock] = POLLOUT
         self.assertEqual(registered, [(sock, POLLOUT, poller.ADDED)])
 
         for x in poller.poll():
