@@ -5,7 +5,7 @@ from __future__ import absolute_import
 
 import itertools
 
-import ordereddict
+import oset
 
 #############################################################################
 #############################################################################
@@ -57,19 +57,18 @@ class MatchPredicate(Match):
     def __and__(self, value):
         return self.predicate(value)
 
-class Dispatch(ordereddict.OrderedDict):
+class Matchings(oset.OrderedSet):
 
-    def forall(self, value): # executes all matches
+    def all(self, value): # finds all matches
         for match in self:
             if match & value:
-                rule = self[match]
-                yield rule(value)
-
-    def forany(self, value): # executes the first match
+                yield match
+                
+    def any(self, value): # finds the first match, or None
         for match in self:
             if match & value:
-                rule = self[match]
-                return rule(value)
+                return match
+        return None
 
 #############################################################################
 #############################################################################
