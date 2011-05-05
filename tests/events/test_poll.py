@@ -14,7 +14,7 @@ History
 import unittest
 import socket
 
-from pynet.events.dispatch import *
+from pynet.events.match import *
 from pynet.events.poll import *
 
 #############################################################################
@@ -36,8 +36,7 @@ class TestCasePoll(unittest.TestCase):
         poller[sock] = POLLOUT
         self.assertEqual(registered, [(sock, POLLOUT, poller.ADDED)])
 
-        for x in poller.poll():
-            pass
+        poller.poll()
         self.assertEqual(events, [(sock, POLLOUT,)])
         
 #############################################################################

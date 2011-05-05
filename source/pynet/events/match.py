@@ -5,8 +5,6 @@ from __future__ import absolute_import
 
 import itertools
 
-import oset
-
 #############################################################################
 #############################################################################
 
@@ -56,19 +54,6 @@ class MatchPredicate(Match):
     
     def __and__(self, value):
         return self.predicate(value)
-
-class Matchings(oset.OrderedSet):
-
-    def all(self, value): # finds all matches
-        for match in self:
-            if match & value:
-                yield match
-                
-    def any(self, value): # finds the first match, or None
-        for match in self:
-            if match & value:
-                return match
-        return None
 
 #############################################################################
 #############################################################################
