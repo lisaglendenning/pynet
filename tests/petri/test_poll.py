@@ -14,8 +14,8 @@ History
 import unittest
 import socket
 
-import pynet.io.poll
-import pynet.petri.poll
+from pynet.mapping import *
+from pynet.petri.poll import *
 
 #############################################################################
 #############################################################################
@@ -23,22 +23,23 @@ import pynet.petri.poll
 class TestCasePoll(unittest.TestCase):
     def test_dgram(self, HOST='127.0.0.1', PORT=9000):
         
+        poller = Polling()
+        
+        registered = []
+        poller.registry.register(MatchAny, lambda x: registered.append(x))
+        events = []
+        poller.events.register(MatchAny, lambda x: events.append(x))
+        
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        input = { sock: pynet.io.poll.POLLOUT, }
-        net = pynet.petri.poll.Network(input=pynet.petri.poll.Poller(marking=input))
+        input = { sock: POLLOUT, }
+        poller.update(input)
+        self.assertEqual(registered, [(sock, POLLOUT, poller.ADDED)])
 
-        events = [e for e in net.polling.next()]
-        self.assertEqual(len(events), 1)
-        self.assertTrue(net.poll is not None)
-        
-        self.assertFalse(net.output)
-        output = net.poll()
-        self.assertTrue(net.output)
-        self.assertTrue(sock in net.output)
-        self.assertTrue(net.output[sock] & pynet.io.poll.POLLOUT)
-        self.assertEqual(dict(net.output), dict(output))
+        for x in poller.poll():
+            pass
+        self.assertEqual(events, [(sock, POLLOUT,)])
         
 #############################################################################
 #############################################################################

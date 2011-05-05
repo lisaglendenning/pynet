@@ -19,7 +19,7 @@ from __future__ import absolute_import
 
 import select as pyselect
 
-from .ipoll import *
+#from .ipoll import *
 
 if hasattr(pyselect, 'epoll'):
     from .epoll import *
