@@ -19,6 +19,23 @@ class Poller(IPoller):
         self.readables = set()
         self.writables = set()
         self.exceptables = set()
+    
+    def __iter__(self):
+        keys = self.readables | self.writables | self.exceptables
+        for k in keys:
+            return k
+    
+    def __len__(self):
+        return len(self.keys())
+    
+    def __getitem__(self, fd):
+        v = 0
+        for e, fds in ((POLLIN, self.readables), (POLLOUT, self.writables),):
+            if fd in fds:
+                v |= e
+        if v:
+            return v | POLLEX
+        raise KeyError(fd)
 
     def __setitem__(self, fd, events):
         if fd in self:
@@ -39,7 +56,6 @@ class Poller(IPoller):
         else:
             if fd in self.exceptables:
                 self.exceptables.remove(fd)
-        super(Poller, self).__setitem__(fd, events)
     
     def __delitem__(self, fd):
         if fd not in self:
@@ -50,7 +66,6 @@ class Poller(IPoller):
                 if flag & old:
                     group.remove(fd)
             self.exceptables.remove(fd)
-        super(Poller, self).__delitem__(fd)
     
     def poll(self, timeout=0.0):
         # must be sequences of integers or objects with fileno()
