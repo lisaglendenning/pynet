@@ -52,10 +52,39 @@ class Outputs(collections.MutableSet, trellis.Component):
         for output in self:
             output.send(*args, **kwargs)
 
-class Polled(net.Condition):
+class Polled(collections.MutableMapping, net.Condition):
 
     marking = trellis.make(trellis.Dict)
+
+    def __hash__(self):
+        return object.__hash__(self)
     
+    def __eq__(self, other):
+        return self is other
+    
+    def __nonzero__(self):
+        return len(self) > 0
+    
+    @trellis.compute
+    def __len__(self,):
+        return self.marking.__len__
+
+    @trellis.compute
+    def __iter__(self,):
+        return self.marking.__iter__
+    
+    @trellis.compute
+    def __getitem__(self,):
+        return self.marking.__getitem__
+
+    @trellis.compute
+    def __delitem__(self,):
+        return self.marking.__delitem__
+
+    @trellis.compute
+    def __setitem__(self,):
+        return self.marking.__setitem__
+        
     @trellis.modifier
     def send(self, event):
         marking = self.marking

@@ -25,7 +25,7 @@ class Poller(IPoller):
     def __iter__(self):
         keys = self.readables | self.writables | self.exceptables
         for k in keys:
-            return k
+            yield k
     
     def __len__(self):
         return len(self.keys())

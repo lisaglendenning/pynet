@@ -54,14 +54,14 @@ class TestCasePoll(unittest.TestCase):
         sock.bind((HOST, PORT))
         
         net.pollin.send((sock, POLLOUT))
-        self.assertTrue(sock in net.pollin.marking)
-        self.assertTrue(not net.pollout.marking)
+        self.assertTrue(sock in net.pollin)
+        self.assertFalse(net.pollout)
         
         net.poll()
-        
-        self.assertFalse(not net.pollin)
-        self.assertTrue(sock in net.pollout.marking)
-        self.assertTrue(net.pollout.marking[sock] & POLLOUT)
+
+        self.assertFalse(net.pollin)
+        self.assertTrue(sock in net.pollout)
+        self.assertTrue(net.pollout[sock] & POLLOUT)
         
 #############################################################################
 #############################################################################
