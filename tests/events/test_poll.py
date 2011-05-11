@@ -20,37 +20,48 @@ from pynet.events.poll import *
 #############################################################################
 #############################################################################
 
-class Listener(trellis.Component):
-    
-    def __init__(self, polled):
-        self.polled = polled
-    
-    @trellis.maintain(initially=0)
-    def events(self):
-        events = self.events
-        polled = self.polled
-        if polled.events:
-            events |= polled.events
-        return events
+class Simple(Polling):
 
+    @trellis.maintain(initially=None)
+    def pollin(self):
+        pollin = self.pollin
+        if pollin is None:
+            pollin = self.Condition()
+        if pollin not in self.vertices:
+            self.vertices.add(pollin)
+            self.link(pollin, self.poll)
+        return pollin
+    
+    @trellis.maintain(initially=None)
+    def pollout(self):
+        pollout = self.pollout
+        if pollout is None:
+            pollout = self.Condition()
+        if pollout not in self.vertices:
+            self.vertices.add(pollout)
+            self.link(self.poll, pollout)
+        return pollout
+    
+    
+        
 class TestCasePoll(unittest.TestCase):
+
     def test_dgram(self, HOST='127.0.0.1', PORT=9000):
         
-        polling = Polling()
+        net = Simple()
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        polling[sock] = POLLOUT
-        self.assertTrue(sock in polling)
-        polled = polling[sock]
-        self.assertEqual(polled.registry, POLLOUT)
+        net.pollin.send((sock, POLLOUT))
+        self.assertTrue(sock in net.pollin.marking)
+        self.assertTrue(not net.pollout.marking)
         
-        listener = Listener(polled)
-
-        self.assertEqual(listener.events, 0)
-        polling.poll()
-        self.assertEqual(listener.events, POLLOUT)
+        net.poll()
+        
+        self.assertFalse(not net.pollin)
+        self.assertTrue(sock in net.pollout.marking)
+        self.assertTrue(net.pollout.marking[sock] & POLLOUT)
         
 #############################################################################
 #############################################################################

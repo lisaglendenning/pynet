@@ -40,6 +40,10 @@ class Dispatch(collections.MutableMapping, trellis.Component):
         return self.keys.__iter__
     
     @trellis.compute
+    def __contains__(self,):
+        return self.keys.__contains__
+    
+    @trellis.compute
     def __getitem__(self,):
         return self.values.__getitem__
 

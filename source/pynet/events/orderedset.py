@@ -23,7 +23,8 @@ class OrderedSet(collections.MutableSet, trellis.Component):
         end = []
         end += [None, end, end]         # sentinel node for doubly linked list
         trellis.Component.__init__(self, end=end,)
-        self.update(*args, **kwargs)
+        if args or kwargs:
+            self.update(*args, **kwargs)
     
     @trellis.compute
     def __len__(self):
@@ -56,6 +57,11 @@ class OrderedSet(collections.MutableSet, trellis.Component):
         while curr is not end:
             yield curr[KEY]
             curr = curr[PREV]
+    
+    @trellis.modifier
+    def update(self, iterable):
+        for item in iterable:
+            self.add(item)
             
     def pop(self, last=True):
         if not self:

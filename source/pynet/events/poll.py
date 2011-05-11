@@ -16,7 +16,7 @@ from ..io.poll import *
 
 class Output(net.Arc):
     
-    match = trellis.make(MatchAny)
+    match = trellis.make(Match)
 
 class Outputs(collections.MutableSet, trellis.Component):
 
@@ -86,18 +86,19 @@ class Polled(net.Condition):
         if self.marking:
             yield self.Event(self.pull)
 
-class Poll(net.Transition):
+class Poll(collections.MutableMapping, net.Transition):
 
     poller = trellis.make(Poller)
     
-    @trellis.maintain(initially=dispatch.Dispatch)
+    @trellis.maintain(make=Dispatch)
     def dispatch(self):
         dispatch = self.dispatch
         outputs = self.outputs
         for o in outputs.added:
             if o.match not in dispatch:
-                dispatch[o.match] = Outputs()
-            dispatch[o.match].add(o)
+                dispatch[o.match] = Outputs(items=set([o]))
+            else:
+                dispatch[o.match].add(o)
         for o in outputs.removed:
             if o.match in dispatch:
                 dispatch[o.match].remove(o)
@@ -136,6 +137,12 @@ class Poll(net.Transition):
             undo = registry.__delitem__, k,
         registry[k] = v
         trellis.on_undo(*undo)
+    
+    @trellis.modifier
+    def __call__(self):
+        for event in self.next():
+            event()
+            break
 
     @trellis.modifier
     def send(self, thunks):

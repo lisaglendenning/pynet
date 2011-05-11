@@ -105,6 +105,7 @@ class Socket(trellis.Component):
         f = self.socket.bind
         performs = self.performs(f)
         @functools.wraps(f)
+        @trellis.modifier
         def wrapper(*args, **kwargs):
             result = performs(*args, **kwargs)
             if self.next is None:
@@ -139,6 +140,7 @@ class DatagramSocket(Socket):
         if self.state in (self.START, self.CONNECTING,):
             def wrapper(f):
                 @functools.wraps(f)
+                @trellis.modifier
                 def inner(*args, **kwargs):
                     result = f(*args, **kwargs)
                     if self._bound() is not None:
