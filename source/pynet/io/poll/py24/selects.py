@@ -39,7 +39,7 @@ class Poller(IPoller):
         else:
             if fd in self.exceptables:
                 self.exceptables.remove(fd)
-        super(Poller, self).__setitem__(fd, events)
+        IPoller.__setitem__(self, fd, events)
     
     def __delitem__(self, fd):
         if fd not in self:
@@ -50,7 +50,7 @@ class Poller(IPoller):
                 if flag & old:
                     group.remove(fd)
             self.exceptables.remove(fd)
-        super(Poller, self).__delitem__(fd)
+        IPoller.__delitem__(self, fd)
     
     def poll(self, timeout=0.0):
         # must be sequences of integers or objects with fileno()
