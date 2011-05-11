@@ -28,4 +28,4 @@ if sys.version_info[1] < 4 or sys.version_info[1] > 6:
 if sys.version_info[1] == 4:
     from py24 import *
 else: # untested for 2.5
-    from .py26 import *
+    from py26 import *

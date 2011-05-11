@@ -1,13 +1,13 @@
 
 from __future__ import absolute_import
 
-import select as pyselect
+import select
 
-if hasattr(pyselect, 'epoll'):
-    from .epoll import *
-elif hasattr(pyselect, 'poll'):
-    from .poll import *
-elif hasattr(pyselect, 'select'):
-    from .select import *
+if hasattr(select, 'epoll'):
+    from .epolls import *
+elif hasattr(select, 'poll'):
+    from .polls import *
+elif hasattr(select, 'select'):
+    from .selects import *
 else:
-    raise RuntimeError(pyselect)
+    raise RuntimeError(select)
