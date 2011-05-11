@@ -3,12 +3,6 @@
 
 import sys
 
-if sys.version_info[1] < 6:
-    import UserDict
-else:
-    import abc
-    import collections
-
 #############################################################################
 #############################################################################
 
@@ -21,7 +15,9 @@ POLLIN, POLLOUT, POLLHUP, POLLEX, = EVENTS
 
 if sys.version_info[1] < 6:
     
-    class IPoller(UserDict.DictMixin):
+    import UserDict
+    
+    class IPoller(dict):
         """
         Registered objects must either be integer file descriptors, or
         be hashable objects with a fileno() method that returns a file descriptor.
@@ -36,26 +32,29 @@ if sys.version_info[1] < 6:
                 raise TypeError(obj)
             return fd
         
-        def __init__(self):
-            self.registry = {}
-    
-        def __getitem__(self, fd):
-            return self.registry[fd]
-    
-        def __setitem__(self, fd, events):
-            self.registry[fd] = events
-            
-        def __delitem__(self, fd):
-            if fd not in self:
-                raise KeyError(fd)
-            del self.registry[fd]
-        
-        def __len__(self):
-            return len(self.registry)
-        
-        def __iter__(self):
-            for k in self.registry:
-                yield k
+#        def __init__(self):
+#            self.registry = {}
+#    
+#        def __getitem__(self, fd):
+#            return self.registry[fd]
+#    
+#        def __setitem__(self, fd, events):
+#            self.registry[fd] = events
+#            
+#        def __delitem__(self, fd):
+#            if fd not in self:
+#                raise KeyError(fd)
+#            del self.registry[fd]
+#        
+#        def __len__(self):
+#            return len(self.registry)
+#        
+#        def __iter__(self):
+#            for k in self.registry:
+#                yield k
+#        
+#        def keys(self):
+#            return self.registry.keys()
 
         def poll(self, timeout=0.0):
             r"""
@@ -63,6 +62,8 @@ if sys.version_info[1] < 6:
             """
             pass
 else:
+    import abc
+    import collections
     
     class IPoller(collections.MutableMapping):
         r"""
