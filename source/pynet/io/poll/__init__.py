@@ -15,16 +15,17 @@ http://scotdoyle.com/python-epoll-howto.html
 
 """
 
-from __future__ import absolute_import
+import sys
 
-import select as pyselect
+if sys.version_info[0] != 2:
+    raise RuntimeError("Python version %d unsupported" % sys.version_info[0])
 
-if hasattr(pyselect, 'epoll'):
-    from .epoll import *
-elif hasattr(pyselect, 'poll'):
-    from .poll import *
-elif hasattr(pyselect, 'select'):
-    from .select import *
-else:
-    raise RuntimeError(pyselect)
 
+if sys.version_info[1] < 4 or sys.version_info[1] > 6:
+    raise RuntimeError("Python version 2.%d unsupported" % sys.version_info[1])
+
+# relative imports are not available until 2.5
+if sys.version_info[1] == 4:
+    from py24 import *
+else: # untested for 2.5
+    from .py26 import *
