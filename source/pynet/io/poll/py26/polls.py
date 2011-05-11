@@ -1,6 +1,8 @@
 # @copyright
 # @license
 
+from __future__ import absolute_import
+
 from .ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
 
 from select import poll as epoll
@@ -22,7 +24,10 @@ class Poller(IPoller):
     
     def __del__(self):
         self.clear()
-        super(Poller, self).__del__()
+        try:
+            super(Poller, self).__del__()
+        except AttributeError:
+            pass
 
     def __setitem__(self, fd, events):
         flags = 0

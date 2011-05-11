@@ -1,6 +1,11 @@
 # @copyright
 # @license
 
+from __future__ import absolute_import
+
+import abc
+import collections
+
 #############################################################################
 #############################################################################
 
@@ -11,15 +16,11 @@ POLLIN, POLLOUT, POLLHUP, POLLEX, = EVENTS
 #############################################################################
 #############################################################################
 
-import abc
-import collections
-
 class IPoller(collections.MutableMapping):
     r"""
     Registered objects must either be integer file descriptors, or
     be hashable objects with a fileno() method that returns a file descriptor.
     """
-#    __metaclass__ = abc.ABCMeta
 
     @classmethod
     def get_fileno(cls, obj):

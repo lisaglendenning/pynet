@@ -1,6 +1,8 @@
 # @copyright
 # @license
 
+from __future__ import absolute_import
+
 from .ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
 
 import select as pyselect
