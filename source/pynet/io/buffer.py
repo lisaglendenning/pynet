@@ -51,6 +51,8 @@ class Bounded(object):
 ##############################################################################
 
 class Buffer(Bounded):
+    
+    array = ctypes.create_string_buffer
 
     def __init__(self, bufsize=None):
         """
@@ -61,7 +63,7 @@ class Buffer(Bounded):
         """
         if bufsize is None:
             bufsize = 0
-        self.buffer = ctypes.create_string_buffer(bufsize)
+        self.buffer = self.array(bufsize)
     
     start = property(lambda self: 0)
     stop = property(lambda self: len(self.buffer))

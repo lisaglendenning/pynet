@@ -5,32 +5,105 @@ import collections
 
 from peak.events import trellis
 
-from .dispatch import *
+from pypetri import net
 
+from .match import *
+from .dispatch import *
 from ..io.poll import *
 
 #############################################################################
 #############################################################################
 
-class Polling(collections.MutableMapping, trellis.Component):
-
-    ADDED = 'ADDED'
-    CHANGED = 'CHANGED'
-    REMOVED = 'REMOVED'
-    CHANGES = [ADDED, CHANGED, REMOVED,]
+class Output(net.Arc):
     
-    registry = trellis.make(Dispatch)
-    poller = trellis.make(Poller)
-    events = trellis.make(Dispatch)
+    match = trellis.make(MatchAny)
 
+class Outputs(collections.MutableSet, trellis.Component):
+
+    items = trellis.make(set)
+    
     @trellis.compute
-    def __hash__(self):
-        return self.poller.__hash__
+    def __iter__(self,):
+        return self.items.__iter__
     
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        return self.poller == other.poller
+    @trellis.compute
+    def __contains__(self,):
+        return self.items.__contains__
+    
+    @trellis.compute
+    def __len__(self,):
+        return self.items.__contains__
+    
+    @trellis.modifier
+    def add(self, item):
+        items = self.items
+        if item not in items:
+            items.add(item)
+            trellis.on_undo(items.remove, item)
+            
+    @trellis.modifier
+    def discard(self, item):
+        items = self.items
+        if item in items:
+            items.remove(item)
+            trellis.on_undo(items.add, item)
+    
+    def __call__(self, *args, **kwargs):
+        for output in self:
+            output.send(*args, **kwargs)
+
+class Polled(net.Condition):
+
+    marking = trellis.make(trellis.Dict)
+    
+    @trellis.modifier
+    def send(self, event):
+        marking = self.marking
+        fd, event = event
+        if fd in marking:
+            marking[fd] |= event
+        else:
+            marking[fd] = event
+    
+    @trellis.modifier
+    def pull(self, marking=None):
+        if marking is None:
+            marking = self.marking
+            marking.clear()
+        else:
+            pulled = self.marking
+            for k in marking:
+                if k in pulled:
+                    v = marking[k]
+                    old = pulled[k]
+                    if v == old:
+                        del pulled[k]
+                    else:
+                        pulled[k] = old & ~v
+        return marking
+    
+    def next(self):
+        if self.marking:
+            yield self.Event(self.pull)
+
+class Poll(net.Transition):
+
+    poller = trellis.make(Poller)
+    
+    @trellis.maintain(initially=dispatch.Dispatch)
+    def dispatch(self):
+        dispatch = self.dispatch
+        outputs = self.outputs
+        for o in outputs.added:
+            if o.match not in dispatch:
+                dispatch[o.match] = Outputs()
+            dispatch[o.match].add(o)
+        for o in outputs.removed:
+            if o.match in dispatch:
+                dispatch[o.match].remove(o)
+                if not dispatch[o.match]:
+                    del dispatch[o.match]
+        return dispatch
     
     @trellis.compute
     def __len__(self,):
@@ -46,60 +119,56 @@ class Polling(collections.MutableMapping, trellis.Component):
 
     @trellis.modifier
     def __delitem__(self, k,):
-        poller = self.poller
-        if k not in poller:
+        registry = self.poller
+        if k not in registry:
             raise KeyError(k)
-        v = poller[k]
-        del poller[k]
-        trellis.on_undo(poller.__setitem__, k, v)
-        event = (k, v, self.REMOVED,)
-        self.registry.put(event)
+        v = registry[k]
+        del registry[k]
+        trellis.on_undo(registry.__setitem__, k, v,)
 
     @trellis.modifier
     def __setitem__(self, k, v,):
-        poller = self.poller
-        if k in poller:
-            undo = poller.__setitem__, k, poller[k]
-            change = self.CHANGED
+        registry = self.poller
+        if k in registry:
+            v = registry[k]
+            undo = registry.__setitem__, k, v,
         else:
-            undo = poller.__delitem__, k,
-            change = self.ADDED
-        poller[k] = v
+            undo = registry.__delitem__, k,
+        registry[k] = v
         trellis.on_undo(*undo)
-        event = (k, v, change,)
-        self.registry.put(event)
-
-    def unset(self, k, flags=None):
-        if k in self:
-            current = self[k]
-            if flags is None:
-                flags = current
-                result = 0
-            elif flags:
-                result = current & ~(flags)
-            if result:
-                self[k] = result
-            else:
-                del self[k]
-        return flags
-
-    def set(self, k, flags=0):
-        if k in self and flags:
-            flags = self[k] | flags
-        self[k] = flags
-        return flags
-
-    def isset(self, k, flags=0):
-        if flags and k in self:
-            return self[k] & flags
-        return False
 
     @trellis.modifier
-    def poll(self):
+    def send(self, thunks):
+        # update registry
+        removed = set(self.keys())
+        for thunk in thunks:
+            registry = thunk()
+            for k,v in registry.iteritems():
+                if k in self:
+                    removed.remove(k)
+                    self[k] |= v
+                else:
+                    self[k] = v
+        for k in removed:
+            del self[k]
+        
+        # dispatch events
         poll = self.poller.poll
-        events = self.events
+        dispatch = self.dispatch
         for fd, event in poll():
-            events.put((fd, event))
+            dispatch.send((fd, event,))
+
+#############################################################################
+#############################################################################
+
+
+class Polling(net.Network):
+    
+    Transition = Poll
+    Arc = Output
+    Condition = Polled
+    
+    poll = trellis.make(Poll)
 
 #############################################################################
 #############################################################################

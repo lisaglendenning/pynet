@@ -1,6 +1,11 @@
 # @copyright
 # @license
 
+# TODO: this data is inefficient because every match is checked
+# for every event
+# However, this inefficiency could be eliminated using caching
+# if matches and events are constants (immutable)
+
 from __future__ import absolute_import
 
 import collections
@@ -15,12 +20,13 @@ class Dispatch(collections.MutableMapping, trellis.Component):
 
     keys = trellis.make(None)
     values = trellis.make(None)
-    cache = trellis.attr(resetting_to={}) # TODO: inefficient?
 
-    def __init__(self, Keys=None, Values=dict):
+    def __init__(self, Keys=None, Values=None):
         if Keys is None:
-            from oset import oset
-            Keys = oset
+            from . import orderedset
+            Keys = orderedset.OrderedSet
+        if Values is None:
+            Values = trellis.Dict
         keys = Keys()
         values = Values()
         trellis.Component.__init__(self, keys=keys, values=values)
@@ -37,22 +43,23 @@ class Dispatch(collections.MutableMapping, trellis.Component):
     def __getitem__(self,):
         return self.values.__getitem__
 
+    @trellis.modifier
     def __delitem__(self, k,):
+        if k not in self:
+            raise KeyError(k)
         self.keys.remove(k)
         del self.values[k]
 
+    @trellis.modifier
     def __setitem__(self, k, v,):
         self.keys.add(k)
         self.values[k] = v
     
     @trellis.modifier
-    def put(self, value):
-        cache = self.cache
+    def send(self, value):
         for k in self.all(value):
             thunk = self[k]
-            if value not in cache:
-                cache[value] = []
-            cache[value].append((thunk, thunk(value)))
+            thunk(value)
 
     def all(self, v): # yields all matches
         return itertools.ifilter(lambda x: x & v, iter(self))

@@ -6,12 +6,13 @@ import errno
 import os
 import functools
 
-from pypetri import trellis
+from peak.events import trellis
 
 #############################################################################
 #############################################################################
 
 class Socket(trellis.Component):
+    """Wraps a socket with a simple state machine."""
     
     NONE = ('0.0.0.0', 0)
     
@@ -34,7 +35,8 @@ class Socket(trellis.Component):
     STATES = [START, CONNECTING, CONNECTED, LISTENING, CLOSING, CLOSED, ERROR,]
     
     socket = trellis.make(socket.socket)
-    state = trellis.attr(START)
+    next = trellis.attr(resetting_to=None)
+    error = trellis.attr(None)
     
     def __init__(self, sock=None, state=None, **options):
         if sock is None:
@@ -47,6 +49,14 @@ class Socket(trellis.Component):
         if state is None:
             state = self.START
         super(Socket, self).__init__(socket=sock, state=state)
+    
+    @trellis.maintain
+    def state(self):
+        prev = self.state
+        next = self.next
+        if next is not None and next != prev:
+            return next
+        return prev
     
     @trellis.compute
     def __hash__(self):
@@ -61,61 +71,58 @@ class Socket(trellis.Component):
     def fileno(self):
         return self.socket.fileno
     
-    def catches(self, f):
+    def performs(self, f):
         @functools.wraps(f)
+        @trellis.modifier
         def wrapper(*args, **kwargs):
             try:
                 result = f(*args, **kwargs)
-            except IOError:
+            except IOError as e:
                 if self.state != self.ERROR:
-                    self.state = self.ERROR
+                    self.next = self.ERROR
+                self.error = e
                 raise
             else:
                 return result
         return wrapper
     
-    @trellis.maintain(initially=None)
-    def local(self):
-        sock = self.socket
-        state = self.state
-        if sock is not None and state not in (self.START, self.CLOSED, self.ERROR):
-            try:
-                addr = sock.getsockname()
-            except IOError:
-                pass
-            else:
-                return addr
+    def _bound(self,):
+        try:
+            return self.socket.getsockname()
+        except IOError:
+            return None
+        
+    @trellis.compute
+    def bound(self):
+        if self.state not in (self.START, self.CLOSED, self.ERROR,):
+            return self._bound()
         return None
     
-    @trellis.maintain(initially=None)
-    def remote(self):
-        sock = self.socket
-        state = self.state
-        if sock is not None and state not in (self.START, self.CLOSED, self.ERROR):
-            try:
-                addr = sock.getpeername()
-            except IOError:
-                pass
-            else:
-                return addr
-        return None
-    
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def bind(self):
         if self.state != self.START:
             return None
         f = self.socket.bind
-        return self.catches(f)
+        performs = self.performs(f)
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            result = performs(*args, **kwargs)
+            if self.next is None:
+                self.next = self.CONNECTING
+            return result
+        return wrapper
     
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def close(self):
         if self.state == self.CLOSED:
             return None
         f = self.socket.close
+        performs = self.performs(f)
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            self.state = self.CLOSED
+            result = performs(*args, **kwargs)
+            if self.next is None:
+                self.next = self.CLOSED
             return result
         return wrapper
     
@@ -125,50 +132,44 @@ class Socket(trellis.Component):
 class DatagramSocket(Socket):
     
     TRANSPORT = Socket.DATAGRAM
-
-    @trellis.maintain(initially=None)
-    def bind(self):
-        if self.state != self.START:
-            return None
-        f = self.socket.bind
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            self.state = self.CONNECTED
-            return result
-        return wrapper
+    
+    @trellis.compute
+    def performs(self,):
+        outer = super(DatagramSocket, self).performs
+        if self.state in (self.START, self.CONNECTING,):
+            def wrapper(f):
+                @functools.wraps(f)
+                def inner(*args, **kwargs):
+                    result = f(*args, **kwargs)
+                    if self._bound() is not None:
+                        if self.next is None:
+                            self.next = self.CONNECTED
+                    return result
+                return outer(inner)
+            return wrapper
+        else:
+            return outer
         
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def send(self):
         if self.state not in (self.START, self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.sendto
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            if self.state == self.START:
-                try:
-                    addr = self.socket.getsockname()
-                except IOError:
-                    pass
-                else:
-                    if addr is not None and addr != self.NONE:
-                        self.state = self.CONNECTED
-            return result
-        return wrapper
+        return self.performs(f)
     
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def recv(self):
         if self.state not in (self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.recvfrom
-        return self.catches(f)
+        return self.performs(f)
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def recv_into(self):
         if self.state not in (self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.recvfrom_into
-        return self.catches(f)
+        return self.performs(f)
     
 #############################################################################
 #############################################################################
@@ -177,21 +178,52 @@ class StreamSocket(Socket):
     
     TRANSPORT = Socket.STREAM
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
+    def performs(self,):
+        outer = super(StreamSocket, self).performs
+        if self.state in (self.CONNECTING,):
+            def wrapper(f):
+                @functools.wraps(f)
+                def inner(*args, **kwargs):
+                    result = f(*args, **kwargs)
+                    if self._connected() is not None:
+                        if self.next is None:
+                            self.next = self.CONNECTED
+                    return result
+                return outer(inner)
+            return wrapper
+        else:
+            return outer
+        
+    def _connected(self):
+        try:
+            return self.socket.getpeername()
+        except IOError:
+            return None
+    
+    @trellis.compute
+    def connected(self):
+        if self.state not in (self.START, self.CLOSED, self.ERROR,):
+            return self._connected()
+        return None
+    
+    @trellis.compute
     def listen(self):
         if self.state != self.START:
             return None
         f = self.socket.listen
+        performs = self.performs(f)
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             if not args and not kwargs:
                 kwargs['backlog'] = 1
-            result = self.catches(f)(*args, **kwargs)
-            self.state = self.LISTENING
+            result = performs(*args, **kwargs)
+            if self.next is None:
+                self.next = self.LISTENING
             return result
         return wrapper
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def accept(self):
         if self.state != self.LISTENING:
             return None
@@ -199,7 +231,7 @@ class StreamSocket(Socket):
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             try:
-                result = f()
+                result = f(*args, **kwargs)
             except socket.error as why:
                 if why.args[0] not in (errno.EAGAIN, errno.EWOULDBLOCK,):
                     raise
@@ -207,98 +239,55 @@ class StreamSocket(Socket):
                 sock = self.__class__(sock=result[0], state=self.CONNECTED)
                 return sock, result[1]
             return None
-        return wrapper
+        return self.performs(wrapper)
     
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def connect(self):
         if self.state != self.START:
             return None
         f = self.socket.connect_ex
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            err = self.catches(f)(*args, **kwargs)
+            err = f(*args, **kwargs)
             if err in (0, errno.EISCONN,):
-                self.state = self.CONNECTED
+                if not self.next:
+                    self.next = self.CONNECTED
             elif err == errno.EINPROGRESS:
-                self.state = self.CONNECTING
+                if not self.next:
+                    self.next = self.CONNECTING
             else:
-                self.state = self.ERROR
                 raise socket.error(err, os.strerror(err))
-        return wrapper
+        return self.performs(wrapper)
     
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def send(self):
         if self.state not in (self.CONNECTING, self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.send
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            if self.state == self.CONNECTING:
-                try:
-                    addr = self.socket.getpeername()
-                except IOError:
-                    pass
-                else:
-                    if addr is not None and addr != self.NONE:
-                        self.state = self.CONNECTED
-            return result
-        return wrapper
+        return self.performs(f)
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def sendall(self):
         if self.state not in (self.CONNECTING, self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.sendall
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            if self.state == self.CONNECTING:
-                try:
-                    addr = self.socket.getpeername()
-                except IOError:
-                    pass
-                else:
-                    if addr is not None and addr != self.NONE:
-                        self.state = self.CONNECTED
-            return result
-        return wrapper
+        return self.performs(f)
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def recv(self):
         if self.state not in (self.CONNECTING, self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.recv
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            if self.state == self.CONNECTING:
-                try:
-                    addr = self.socket.getpeername()
-                except IOError:
-                    pass
-                else:
-                    if addr is not None and addr != self.NONE:
-                        self.state = self.CONNECTED
-            return result
-        return wrapper
+        return self.performs(f)
 
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def recv_into(self):
         if self.state not in (self.CONNECTING, self.CONNECTED, self.CLOSING,):
             return None
         f = self.socket.recv_into
-        def wrapper(*args, **kwargs):
-            result = self.catches(f)(*args, **kwargs)
-            if self.state == self.CONNECTING:
-                try:
-                    addr = self.socket.getpeername()
-                except IOError:
-                    pass
-                else:
-                    if addr is not None and addr != self.NONE:
-                        self.state = self.CONNECTED
-            return result
-        return wrapper
+        return self.performs(f)
     
-    @trellis.maintain(initially=None)
+    @trellis.compute
     def shutdown(self):
         if self.state in (self.CLOSED, self.CLOSING, self.ERROR):
             return None
@@ -311,10 +300,9 @@ class StreamSocket(Socket):
                 f(*args, **kwargs)
             except socket.error as e:
                 if e.errno != errno.ENOTCONN:
-                    self.state = self.ERROR
                     raise
-            self.state = self.CLOSING
-        return wrapper
+            self.next = self.CLOSING
+        return self.performs(wrapper)
 
 #############################################################################
 #############################################################################

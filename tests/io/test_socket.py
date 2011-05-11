@@ -30,14 +30,14 @@ class TestCaseSocket(unittest.TestCase):
             self.assertEqual(sock.state, sock.START)
             sock.bind((HOST, PORT + i))
             self.assertEqual(sock.state, sock.CONNECTED)
-            self.assertEqual(sock.local, (HOST, PORT + i))
+            self.assertEqual(sock.bound, (HOST, PORT + i))
         
         data = 'hello world!'
         for i in xrange(NSOCKS):
             j = i+1 if i < NSOCKS-1 else 0
             socks[i].socket.settimeout(timeout)
             socks[j].socket.settimeout(None)
-            sent = socks[i].send(data, socks[j].local)
+            sent = socks[i].send(data, socks[j].bound)
             self.assertEqual(len(data), sent)
             recvd = socks[j].recv(sent)
             self.assertEqual(data, recvd[0])
@@ -62,12 +62,12 @@ class TestCaseSocket(unittest.TestCase):
         for sock in connectors:
             sock.socket.settimeout(timeout)
             self.assertEqual(sock.state, sock.START)
-            sock.connect(listener.local)
+            sock.connect(listener.bound)
             self.assertTrue(sock.state in (sock.CONNECTING, sock.CONNECTED,))
             result = listener.accept()
             self.assertTrue(result)
             acceptor, addr = result
-            self.assertEqual(addr, sock.local)
+            self.assertEqual(addr, sock.bound)
             self.assertTrue(acceptor.state in (sock.CONNECTING, sock.CONNECTED,))
             acceptors.append(acceptor)
         

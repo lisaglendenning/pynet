@@ -14,7 +14,7 @@ History
 import unittest
 import socket
 
-import pynet.io.poll
+from pynet.io.poll import *
 
 #############################################################################
 #############################################################################
@@ -41,21 +41,21 @@ class TestCasePoll(unittest.TestCase):
                 received = False
                 while not (sent and received):
                     for sock, event in poller.poll():
-                        if event == pynet.io.poll.POLLIN:
+                        if event == POLLIN:
                             self.assertTrue(sock is socks[j])
                             data, addr = sock.recvfrom(len(token))
                             self.assertEqual(data, token)
                             received = True
-                        elif event == pynet.io.poll.POLLOUT:
+                        elif event == POLLOUT:
                             if sock is socks[i] and not sent:
                                 sock.sendto(token, socks[j].getsockname())
                                 sent = True
                         else:
                             self.fail('%s: %s' % (sock, event))
         
-        poller = pynet.io.poll.Poller()
+        poller = Poller()
         for sock in socks:
-            poller[sock] = pynet.io.poll.POLLIN | pynet.io.poll.POLLOUT
+            poller[sock] = POLLIN | POLLOUT
         test(poller)
 
 #############################################################################

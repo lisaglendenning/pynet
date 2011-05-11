@@ -3,7 +3,7 @@
 
 from __future__ import absolute_import
 
-from .ipoll import IPoller, POLLIN, POLLOUT, POLLEX, POLLHUP
+from .ipoll import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
 
 from select import poll as epoll
 from select import POLLIN as EPOLLIN

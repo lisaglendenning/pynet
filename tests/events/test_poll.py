@@ -14,30 +14,43 @@ History
 import unittest
 import socket
 
-from pynet.events.match import *
+from peak.events import trellis
 from pynet.events.poll import *
 
 #############################################################################
 #############################################################################
 
+class Listener(trellis.Component):
+    
+    def __init__(self, polled):
+        self.polled = polled
+    
+    @trellis.maintain(initially=0)
+    def events(self):
+        events = self.events
+        polled = self.polled
+        if polled.events:
+            events |= polled.events
+        return events
+
 class TestCasePoll(unittest.TestCase):
     def test_dgram(self, HOST='127.0.0.1', PORT=9000):
         
-        poller = Polling()
-        
-        registered = []
-        poller.registry[MatchAny] = lambda x: registered.append(x)
-        events = []
-        poller.events[MatchAny] = lambda x: events.append(x)
+        polling = Polling()
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        poller[sock] = POLLOUT
-        self.assertEqual(registered, [(sock, POLLOUT, poller.ADDED)])
+        polling[sock] = POLLOUT
+        self.assertTrue(sock in polling)
+        polled = polling[sock]
+        self.assertEqual(polled.registry, POLLOUT)
+        
+        listener = Listener(polled)
 
-        poller.poll()
-        self.assertEqual(events, [(sock, POLLOUT,)])
+        self.assertEqual(listener.events, 0)
+        polling.poll()
+        self.assertEqual(listener.events, POLLOUT)
         
 #############################################################################
 #############################################################################
