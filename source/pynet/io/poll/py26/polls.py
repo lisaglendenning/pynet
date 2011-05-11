@@ -3,7 +3,7 @@
 
 from __future__ import absolute_import
 
-from .ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
+from .dict import *
 
 from select import poll as epoll
 from select import POLLIN as EPOLLIN
@@ -14,7 +14,7 @@ from select import POLLHUP as EPOLLHUP
 ##############################################################################
 ##############################################################################
 
-class Poller(IPoller):
+class Poller(Dict):
     
     poller = None
     

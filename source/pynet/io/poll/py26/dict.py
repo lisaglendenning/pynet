@@ -8,7 +8,7 @@ from .ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
 #############################################################################
 #############################################################################
 
-class Dict(IPoller, dict):
+class Dict(dict, IPoller,):
 
     #
     # override builtins
