@@ -1,7 +1,7 @@
 # @copyright
 # @license
 
-from ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
+from .ipolls import IPoller, EVENTS, POLLIN, POLLOUT, POLLEX, POLLHUP
 
 from select import poll as epoll
 from select import POLLIN as EPOLLIN
