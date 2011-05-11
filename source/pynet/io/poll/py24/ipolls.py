@@ -25,36 +25,12 @@ class IPoller(dict):
         if not isinstance(fd, int):
             raise TypeError(obj)
         return fd
-    
-#        def __init__(self):
-#            self.registry = {}
-#    
-#        def __getitem__(self, fd):
-#            return self.registry[fd]
-#    
-#        def __setitem__(self, fd, events):
-#            self.registry[fd] = events
-#            
-#        def __delitem__(self, fd):
-#            if fd not in self:
-#                raise KeyError(fd)
-#            del self.registry[fd]
-#        
-#        def __len__(self):
-#            return len(self.registry)
-#        
-#        def __iter__(self):
-#            for k in self.registry:
-#                yield k
-#        
-#        def keys(self):
-#            return self.registry.keys()
 
     def poll(self, timeout=0.0):
-        r"""
+        r"""Iterator over a set of (fd, event) pairs.
         timeout: seconds (float)
         """
-        pass
+        raise NotImplementedError
 
 #############################################################################
 #############################################################################

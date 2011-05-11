@@ -17,12 +17,15 @@ class Poller(IPoller):
     poller = None
     
     def __init__(self):
-        super(Poller, self).__init__()
+        IPoller.__init__(self)
         self.poller = epoll()
     
     def __del__(self):
         self.clear()
-        super(Poller, self).__del__()
+        try:
+            IPoller.__del__(self)
+        except AttributeError:
+            pass
 
     def __setitem__(self, fd, events):
         flags = 0
@@ -34,10 +37,10 @@ class Poller(IPoller):
             self.poller.modify(fd, flags)
         else:
             self.poller.register(fd, flags)
-        super(Poller, self).__setitem__(fd, events)
+        IPoller.__setitem__(self, fd, events)
     
     def __delitem__(self, fd):
-        super(Poller, self).__delitem__(fd)
+        IPoller.__delitem__(self, fd)
         self.poller.unregister(fd)
 
     def poll(self, timeout=0.0):

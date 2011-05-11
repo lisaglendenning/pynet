@@ -12,13 +12,14 @@ POLLIN, POLLOUT, POLLHUP, POLLEX, = EVENTS
 #############################################################################
 
 import abc
+import collections
 
-class IPoller(dict):
+class IPoller(collections.MutableMapping):
     r"""
     Registered objects must either be integer file descriptors, or
     be hashable objects with a fileno() method that returns a file descriptor.
     """
-    __metaclass__ = abc.ABCMeta
+#    __metaclass__ = abc.ABCMeta
 
     @classmethod
     def get_fileno(cls, obj):
