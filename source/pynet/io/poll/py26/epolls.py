@@ -46,7 +46,7 @@ class Poller(Dict):
         self.poller.unregister(fd)
 
     def poll(self, timeout=0.0):
-        events = self.poll.poll(timeout)
+        events = self.poller.poll(timeout)
         
         for fd, flags in events:
             if not (flags & (EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLHUP)):
