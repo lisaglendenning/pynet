@@ -8,7 +8,7 @@ from peak.events import trellis
 from pypetri import net
 
 from ..io import socket
-from . import poll
+from . import polls
 
 #############################################################################
 #############################################################################
@@ -72,9 +72,9 @@ class Register(net.Transition):
                     break
             else:
                 if sock.LISTENING in (sock.state, sock.next,):
-                    events = poll.POLLIN
+                    events = polls.POLLIN
                 elif not(sock.state == sock.START and sock.next is None):
-                    events = poll.POLLIN | poll.POLLOUT
+                    events = polls.POLLIN | polls.POLLOUT
             out = (sock, events)
             for output in outputs:
                 output.send(out)
@@ -127,9 +127,9 @@ class Split(net.Arc):
         for filtered in self.split(*args, **kwargs):
             super(Split, self).send(filtered)
 
-class SocketPolling(poll.Polling):
+class SocketPolling(polls.Polling):
 
-    @trellis.maintain(make=poll.Polling.Condition)
+    @trellis.maintain(make=polls.Polling.Condition)
     def input(self):
         input = self.input
         if input not in self.vertices:
@@ -142,7 +142,7 @@ class SocketPolling(poll.Polling):
             self.link(input, poll,)
         return input
     
-    @trellis.maintain(make=poll.Polling.Condition)
+    @trellis.maintain(make=polls.Polling.Condition)
     def output(self):
         output = self.output
         if output not in self.vertices:
@@ -206,7 +206,7 @@ class SocketPool(net.Network):
                 for sock in registry:
                     if sock.state == sock.LISTENING:
                         polled = registry[sock]
-                        if polled & poll.POLLIN:
+                        if polled & polls.POLLIN:
                             listeners.append((sock, polled))
                 if listeners:
                     if event.keywords:

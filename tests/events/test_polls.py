@@ -15,7 +15,7 @@ import unittest
 import socket
 
 from peak.events import trellis
-from pynet.events.poll import *
+from pynet.events.polls import *
 
 #############################################################################
 #############################################################################
@@ -44,7 +44,7 @@ class Simple(Polling):
     
     
         
-class TestCasePoll(unittest.TestCase):
+class TestCasePolls(unittest.TestCase):
 
     def test_dgram(self, HOST='127.0.0.1', PORT=9000):
         
