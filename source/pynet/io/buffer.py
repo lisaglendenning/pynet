@@ -52,7 +52,7 @@ class Bounded(object):
 
 class Buffer(Bounded):
     
-    array = ctypes.create_string_buffer
+    array = staticmethod(ctypes.create_string_buffer)
 
     def __init__(self, bufsize=None):
         """

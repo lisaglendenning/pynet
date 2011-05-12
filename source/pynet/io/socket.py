@@ -5,6 +5,7 @@ import socket
 import errno
 import os
 import functools
+import weakref
 
 from peak.events import trellis
 
@@ -14,7 +15,7 @@ from peak.events import trellis
 DATAGRAM = 'DATAGRAM'
 STREAM = 'STREAM'
 TRANSPORTS = [DATAGRAM, STREAM,]
-    
+
 #############################################################################
 #############################################################################
 
@@ -37,15 +38,30 @@ class Socket(trellis.Component):
     ERROR = 'ERROR'
     STATES = [START, CONNECTING, CONNECTED, LISTENING, CLOSING, CLOSED, ERROR,]
     
+    # Subclass factory
+    Factory = weakref.WeakValueDictionary()
+    
     transport = trellis.make(None)
     socket = trellis.make(socket.socket)
     next = trellis.attr(resetting_to=None)
     error = trellis.attr(None)
     
+    # for peak.util.decorators.classy
+    def __class_new__(meta, name, bases, cdict, supr):
+        cls = supr()(meta, name, bases, cdict, supr)
+        if hasattr(cls, 'TRANSPORT',):
+            transport = getattr(cls, 'TRANSPORT',)
+            Socket.Factory[transport] = cls
+        return cls
+    
+    @classmethod
+    def new(cls, transport, *args, **kwargs):
+        return cls.Factory[transport](*args, **kwargs)
+
     def __init__(self, sock=None, state=None, **kwargs):
         if sock is None:
             if 'transport' not in kwargs:
-                raise ValueError(sock)
+                kwargs['transport'] = self.TRANSPORT
             transport = kwargs['transport']
             transport = self.SOCK_TRANSPORTS[transport]
             family = self.SOCK_FAMILY
@@ -54,7 +70,7 @@ class Socket(trellis.Component):
             if 'transport' not in kwargs:
                 for k,v in self.SOCK_TRANSPORTS.iteritems():
                     if v == sock.type:
-                        kwargs['transport'] = v
+                        kwargs['transport'] = k
                         break
         if state is None:
             state = self.START
@@ -142,10 +158,7 @@ class Socket(trellis.Component):
             
 class DatagramSocket(Socket):
     
-    def __init__(self, *args, **kwargs):
-        if 'transport' not in kwargs:
-            kwargs['transport'] = DATAGRAM
-        super(DatagramSocket, self).__init__(*args, **kwargs)
+    TRANSPORT = DATAGRAM
     
     @trellis.compute
     def performs(self,):
@@ -191,10 +204,7 @@ class DatagramSocket(Socket):
 
 class StreamSocket(Socket):
     
-    def __init__(self, *args, **kwargs):
-        if 'transport' not in kwargs:
-            kwargs['transport'] = STREAM
-        super(StreamSocket, self).__init__(*args, **kwargs)
+    TRANSPORT = STREAM
 
     @trellis.compute
     def performs(self,):
@@ -233,8 +243,8 @@ class StreamSocket(Socket):
         performs = self.performs(f)
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            if not args and not kwargs:
-                kwargs['backlog'] = 1
+            if not args:
+                args = (1,)
             result = performs(*args, **kwargs)
             if self.next is None:
                 self.next = self.LISTENING

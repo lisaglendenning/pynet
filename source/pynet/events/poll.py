@@ -59,7 +59,10 @@ class Registry(collections.MutableMapping, net.Condition):
     @trellis.modifier
     def pull(self, args):
         marking = self.marking
-        if args == marking:
+        if args is marking:
+            args = marking.copy()
+            marking.clear()
+        elif args == marking:
             marking.clear()
         else:
             try:
@@ -120,12 +123,6 @@ class Poll(collections.MutableMapping, net.Transition):
             undo = registry.__delitem__, k,
         registry[k] = v
         trellis.on_undo(*undo)
-    
-    @trellis.modifier
-    def __call__(self, *args, **kwargs):
-        for event in self.next(*args, **kwargs):
-            break
-        return event()
 
     @trellis.modifier
     def send(self, thunks, outputs=None):

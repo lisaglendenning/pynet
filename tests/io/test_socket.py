@@ -24,7 +24,7 @@ class TestCaseSocket(unittest.TestCase):
     def test_dgram(self, NSOCKS=2, HOST='0.0.0.0', PORT=9000):
         timeout = 0.001
         
-        socks = [socket.DatagramSocket() for i in xrange(NSOCKS)]
+        socks = [socket.Socket.new(socket.DATAGRAM) for i in xrange(NSOCKS)]
         for i in xrange(NSOCKS):
             sock = socks[i]
             self.assertEqual(sock.state, sock.START)
@@ -51,13 +51,13 @@ class TestCaseSocket(unittest.TestCase):
     def test_stream(self, NSOCKS=2,):
         timeout = 0.001
         
-        listener = socket.StreamSocket()
+        listener = socket.Socket.new(socket.STREAM)
         listener.socket.settimeout(None)
         self.assertEqual(listener.state, listener.START)
         listener.listen(NSOCKS)
         self.assertEqual(listener.state, listener.LISTENING)
         
-        connectors = [socket.StreamSocket() for i in xrange(NSOCKS/2)]
+        connectors = [socket.Socket.new(socket.STREAM) for i in xrange(NSOCKS/2)]
         acceptors = []
         for sock in connectors:
             sock.socket.settimeout(timeout)
