@@ -60,6 +60,10 @@ class TestCaseSockets(unittest.TestCase):
         
         connector.connect(listener.bound)
         
+        for i in net.close.inputs:
+            print "IN", i.input
+        for o in net.close.outputs:
+            print "OUT", o.output
         net.poll(None)
         self.assertTrue(listener not in net.poll.input)
         self.assertTrue(listener in net.poll.output)

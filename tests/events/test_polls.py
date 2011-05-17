@@ -15,6 +15,7 @@ import unittest
 import socket
 
 from peak.events import trellis
+from pypetri import net
 from pynet.events.polls import *
 
 #############################################################################
@@ -32,7 +33,7 @@ class Simple(Polling):
                 break
         else:
             arc = self.Arc()
-            arc.link(pollin, self.poll)
+            net.link(arc, pollin, self.poll)
         return pollin
     
     @trellis.maintain(initially=None)
@@ -45,7 +46,7 @@ class Simple(Polling):
                 break
         else:
             arc = self.Arc()
-            arc.link(self.poll, pollout)
+            net.link(arc, self.poll, pollout)
         return pollout
     
     
