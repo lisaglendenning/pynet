@@ -27,9 +27,12 @@ class Simple(Polling):
         pollin = self.pollin
         if pollin is None:
             pollin = self.Condition()
-        if pollin not in self.vertices:
-            self.vertices.add(pollin)
-            self.link(pollin, self.poll)
+        for output in pollin.outputs:
+            if output.output is self.poll:
+                break
+        else:
+            arc = self.Arc()
+            arc.link(pollin, self.poll)
         return pollin
     
     @trellis.maintain(initially=None)
@@ -37,9 +40,12 @@ class Simple(Polling):
         pollout = self.pollout
         if pollout is None:
             pollout = self.Condition()
-        if pollout not in self.vertices:
-            self.vertices.add(pollout)
-            self.link(self.poll, pollout)
+        for input in pollout.inputs:
+            if input.input is self.poll:
+                break
+        else:
+            arc = self.Arc()
+            arc.link(self.poll, pollout)
         return pollout
     
     
@@ -53,11 +59,12 @@ class TestCasePolls(unittest.TestCase):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((HOST, PORT))
         
-        net.pollin.send((sock, POLLOUT))
+        net.pollin[sock] = POLLOUT
         self.assertTrue(sock in net.pollin)
+        self.assertTrue(net.pollin[sock] & POLLOUT)
         self.assertFalse(net.pollout)
         
-        net.poll()
+        net()
 
         self.assertFalse(net.pollin)
         self.assertTrue(sock in net.pollout)

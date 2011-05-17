@@ -1,3 +1,5 @@
+# @copyright
+# @license
 
 from __future__ import absolute_import
 
@@ -6,90 +8,44 @@ import collections
 from peak.events import trellis
 
 from pypetri import net
+from pypetri.collections import mapping, operators
 
 from ..io.poll import *
 
 #############################################################################
 #############################################################################
 
-class Registry(collections.MutableMapping, net.Condition):
+class PollEvents(mapping.Mapping):
 
-    marking = trellis.make(trellis.Dict)
-
-    def __hash__(self):
-        return object.__hash__(self)
-    
-    def __eq__(self, other):
-        return self is other
-    
-    def __nonzero__(self):
-        return len(self) > 0
-    
-    @trellis.compute
-    def __len__(self,):
-        return self.marking.__len__
-
-    @trellis.compute
-    def __iter__(self,):
-        return self.marking.__iter__
-    
-    @trellis.compute
-    def __getitem__(self,):
-        return self.marking.__getitem__
-
-    @trellis.compute
-    def __delitem__(self,):
-        return self.marking.__delitem__
-
-    @trellis.compute
-    def __setitem__(self,):
-        return self.marking.__setitem__
-        
     @trellis.modifier
-    def send(self, *args):
-        itr = iter(args)
-        marking = self.marking
-        for item in itr:
-            fd, event = item
-            if fd in marking:
-                marking[fd] |= event
+    def update(self, iterable):
+        if isinstance(iterable, collections.Mapping):
+            iterable = iterable.iteritems()
+        for k,v in iterable:
+            if k in self:
+                self[k] |= v
             else:
-                marking[fd] = event
-    
+                self[k] = v
+
     @trellis.modifier
-    def pull(self, args):
-        marking = self.marking
-        if args is marking:
-            args = marking.copy()
-            marking.clear()
-        elif args == marking:
-            marking.clear()
+    def pop(self, item,):
+        if isinstance(item, tuple):
+            k,v = item
+            old = self[k]
+            if v == old:
+                del self[k]
+            else:
+                self[k] = old & ~v
         else:
-            try:
-                itr = args.iteritems()
-            except AttributeError:
-                try:
-                    itr = iter(args)
-                except AttributeError:
-                    raise TypeError(args)
-            for k,v in itr:
-                if k in marking:
-                    old = marking[k]
-                    if v == old:
-                        del marking[k]
-                    else:
-                        marking[k] = old & ~v
-        return args
+            k = item
+            del self[k]
+        return item
     
-    def next(self):
-        if self.marking:
-            yield self.Event(self.pull, self.marking)
-
 #############################################################################
 #############################################################################
 
-class Poll(collections.MutableMapping, net.Transition):
-
+class Polls(collections.MutableMapping, net.Pipe):
+    
     poller = trellis.make(Poller)
     
     @trellis.compute
@@ -123,12 +79,12 @@ class Poll(collections.MutableMapping, net.Transition):
             undo = registry.__delitem__, k,
         registry[k] = v
         trellis.on_undo(*undo)
-
+        
     @trellis.modifier
-    def send(self, thunks, outputs=None):
+    def send(self, inputs, *args, **kwargs):
         # update registry
         removed = set(self.keys())
-        for thunk in thunks:
+        for thunk in inputs:
             registry = thunk()
             for k,v in registry.iteritems():
                 if k in self:
@@ -138,29 +94,36 @@ class Poll(collections.MutableMapping, net.Transition):
                     self[k] = v
         for k in removed:
             del self[k]
-            
-        # dispatch events
-        poll = self.poller.poll
-        if outputs is None:
-            outputs = self.outputs
-        for fd, event in poll():
-            for output in outputs:
-                output.send((fd, event,))
+        super(Polls, self).send(self.poller.poll(), *args, **kwargs)
 
 #############################################################################
 #############################################################################
-
 
 class Polling(net.Network):
+
+    @trellis.modifier
+    def Condition(self, *args, **kwargs):
+        condition = PollEvents(*args, **kwargs)
+        self.conditions.add(condition)
+        return condition
     
-    Transition = Poll
-    Condition = Registry
+    poll = trellis.make(None)
     
-    poll = trellis.make(Poll)
+    def __init__(self, *args, **kwargs):
+        if 'poll' not in kwargs:
+            pipe = Polls()
+            poll = self.Transition(pipe=pipe)
+            kwargs['poll'] = poll
+        super(Polling, self).__init__(*args, **kwargs)
     
     @trellis.compute
     def __call__(self,):
         return self.poll.__call__
+
+#############################################################################
+#############################################################################
+
+Network = Polling
 
 #############################################################################
 #############################################################################

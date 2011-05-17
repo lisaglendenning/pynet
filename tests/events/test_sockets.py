@@ -39,8 +39,8 @@ class TestCaseSockets(unittest.TestCase):
 
         net.close()
         self.assertTrue(sock not in net.poll.output)
-        self.assertTrue(sock.state == sock.CLOSED)
         self.assertTrue(sock in net.sockets)
+        self.assertEqual(sock.state, sock.CLOSED)
 
     def test_stream(self,):
         
@@ -64,11 +64,22 @@ class TestCaseSockets(unittest.TestCase):
         self.assertTrue(listener not in net.poll.input)
         self.assertTrue(listener in net.poll.output)
         self.assertTrue(net.poll.output[listener] & polls.POLLIN)
-        
+
         net.accept()
         self.assertTrue(listener not in net.poll.output)
         self.assertTrue(listener in net.sockets)
         self.assertEqual(len(net.sockets), 3)
+        
+        # it should only take up to N events to close all sockets
+        for i in xrange(len(net.sockets)):
+            try:
+                net.close()
+            except RuntimeError:
+                break
+        
+        self.assertEqual(len(net.sockets), 3)
+        for sock in net.sockets:
+            self.assertEqual(sock.state, sock.CLOSED)
         
 #############################################################################
 #############################################################################

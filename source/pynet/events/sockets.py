@@ -1,3 +1,5 @@
+# @copyright
+# @license
 
 from __future__ import absolute_import
 
@@ -6,6 +8,7 @@ import collections
 from peak.events import trellis
 
 from pypetri import net
+from pypetri.collections import pool, operators
 
 from ..io import socket
 from . import polls
@@ -13,246 +16,199 @@ from . import polls
 #############################################################################
 #############################################################################
 
-# TODO: refactor set and mapping conditions out
-class Pool(collections.MutableSet, net.Condition):
+class Piped(net.Arc):
     
-    marking = trellis.make(trellis.Set)
+    pipe = trellis.attr(None)
     
-    def __hash__(self):
-        return object.__hash__(self)
-    
-    def __eq__(self, other):
-        return self is other
-    
-    @trellis.compute
-    def add(self):
-        return self.marking.add
-
-    @trellis.compute
-    def discard(self):
-        return self.marking.discard
+    @trellis.maintain
+    def _pipes(self):
+        pipe = self.pipe
+        if pipe is None:
+            return
+        if pipe.input is not self.input:
+            pipe.input = self.input
+        if pipe.output is not self.output:
+            pipe.output = self.output
     
     @trellis.compute
-    def __len__(self):
-        return self.marking.__len__
-    
-    @trellis.compute
-    def __iter__(self):
-        return self.marking.__iter__
-    
-    @trellis.compute
-    def __contains__(self):
-        return self.marking.__contains__
-    
-    def pull(self, i):
-        self.discard(i)
-        return i
-
-    def send(self, *args):
-        for item in args:
-            self.add(item)
-
-    def next(self, iterator=None):
-        if iterator is None:
-            iterator=iter
-        for i in iterator(self):
-            yield self.Event(self.pull, i)
-
-class Register(net.Transition):
-
-    # TODO: register for POLLOUT only if there's something to write?
-    def send(self, thunks, outputs=None):
-        if outputs is None:
-            outputs = self.outputs
-        for thunk in thunks:
-            sock = thunk()
-            events = 0
-            for state in sock.state, sock.next:
-                if state in (sock.CLOSED, sock.ERROR,):
-                    break
-            else:
-                if sock.LISTENING in (sock.state, sock.next,):
-                    events = polls.POLLIN
-                elif not(sock.state == sock.START and sock.next is None):
-                    events = polls.POLLIN | polls.POLLOUT
-            out = (sock, events)
-            for output in outputs:
-                output.send(out)
-
-class Accept(net.Transition):
-
-    def send(self, thunks, outputs=None):
-        if outputs is None:
-            outputs = self.outputs
-        for thunk in thunks:
-            polled = thunk()
-            for sock in polled:
-                try:
-                    accepted = sock.accept()
-                except Exception as e:
-                    accepted = e
-                for output in outputs:
-                    output.send(accepted, sock,)
-
-class Close(net.Transition):
-    
-    def send(self, thunks, outputs=None):
-        if outputs is None:
-            outputs = self.outputs
-        for thunk in thunks:
-            socks = thunk()
-            for sock in socks:
-                try:
-                    sock.close()
-                except Exception: # FIXME
-                    pass
-                for output in outputs:
-                    output.send(sock)
-
-class Filter(net.Arc):
-    
-    filter = trellis.make(None)
-    
-    def next(self, *args, **kwargs):
-        for event in super(Filter, self).next(*args, **kwargs):
-            for filtered in self.filter(event):
-                yield filtered
-            
-            
-class Split(net.Arc):
-    
-    split = trellis.make(None)
-    
-    def send(self, *args, **kwargs):
-        for filtered in self.split(*args, **kwargs):
-            super(Split, self).send(filtered)
-
-class SocketPolling(polls.Polling):
-
-    @trellis.maintain(make=polls.Polling.Condition)
-    def input(self):
-        input = self.input
-        if input not in self.vertices:
-            self.vertices.add(input)
-        poll = self.poll
-        for o in input.outputs:
-            if o.output is poll:
-                break
+    def send(self):
+        output = self.pipe if self.pipe is not None else self.output
+        if output is not None:
+            return output.send
         else:
-            self.link(input, poll,)
-        return input
-    
-    @trellis.maintain(make=polls.Polling.Condition)
-    def output(self):
-        output = self.output
-        if output not in self.vertices:
-            self.vertices.add(output)
-        poll = self.poll
-        for i in output.inputs:
-            if i.input is poll:
-                break
+            return net.nada
+        
+    @trellis.compute
+    def next(self):
+        input = self.pipe if self.pipe is not None else self.input
+        if input is not None:
+            return input.next
         else:
-            self.link(poll, output)
-        return output
+            return net.nada
+
+#############################################################################
+#############################################################################
+
+class SocketPolling(polls.Network):
+    
+    input = trellis.make(None)
+    output = trellis.make(None)
+    
+    def __init__(self, *args, **kwargs):
+        for k in 'input', 'output':
+            if k not in kwargs:
+                kwargs[k] = self.Condition()
+        super(SocketPolling, self).__init__(*args, **kwargs)
+        for pair in ((self.input, self.poll), (self.poll, self.output,)):
+            arc = self.Arc()
+            arc.link(*pair)
+
+#############################################################################
+#############################################################################
 
 class SocketPool(net.Network):
 
+    @trellis.modifier
+    def Condition(self, *args, **kwargs):
+        condition = pool.Pool(*args, **kwargs)
+        self.conditions.add(condition)
+        return condition
+    
     @trellis.modifier
     def Socket(self, *args, **kwargs):
         sock = socket.Socket.new(*args, **kwargs)
         self.sockets.add(sock)
         return sock
     
-    @trellis.maintain(make=SocketPolling)
-    def poll(self):
-        poll = self.poll
-        self.vertices.add(poll)
-        return poll
-        
-    @trellis.maintain(make=Pool)
-    def sockets(self):
-        sockets = self.sockets
-        self.vertices.add(sockets)
-        return sockets
-    
-    @trellis.maintain(make=Register)
-    def register(self):
-        register = self.register
-        if register not in self.vertices:
-            self.vertices.add(register)
-        input = self.sockets
-        for i in register.inputs:
-            if i.input is input:
-                break
-        else:
-            self.link(input, register,)
-        output = self.poll.input
-        for o in register.outputs:
-            if o.output is output:
-                break
-        else:
-            self.link(register, output,)
-        return register
-    
-    @trellis.maintain(initially=None)
-    def accept(self):
-        accept = self.accept
-        if accept is None:
-            accept = Accept()
-            self.vertices.add(accept)
-            def input(event):
-                listeners = []
-                registry = event.args[0]
-                for sock in registry:
-                    if sock.state == sock.LISTENING:
-                        polled = registry[sock]
-                        if polled & polls.POLLIN:
-                            listeners.append((sock, polled))
-                if listeners:
-                    if event.keywords:
-                        event = event.__class__(event.func, listeners, **event.keywords)
-                    else:
-                        event.__class__(event.func, listeners,)
-                    yield event
-            self.link(self.poll.output, accept, Arc=Filter, filter=input)
-            def output(*args, **kwargs): # FIXME: clunky
-                for arg in args:
-                    if isinstance(arg, socket.Socket):
-                        yield arg
-                    elif isinstance(arg, tuple):
-                        for item in arg:
-                            if isinstance(item, socket.Socket):
-                                yield item
-            self.link(accept, self.sockets, Arc=Split, split=output)
-        return accept
+    poll = trellis.make(SocketPolling)
+    sockets = trellis.make(Condition)
+    register = trellis.make(None)
+    accept = trellis.make(None)
+    close = trellis.make(None)
 
-    @trellis.maintain(initially=None)
-    def close(self):
-        def input(event):
-            inputs = event.args[0]
-            try:
-                inputs = inputs.keys()
-            except AttributeError:
-                pass
-            if inputs:
-                if event.keywords:
-                    event = event.__class__(event.func, inputs, **event.keywords)
-                else:
-                    event.__class__(event.func, inputs,)
-                yield event
-        close = self.close
-        if close is None:
-            close = Close()
-            self.vertices.add(close)
-            self.link(close, self.sockets,)
-        # sockets can be closed at any time
-        for v in self.poll.input, self.poll.output, self.sockets:
-            for o in v.outputs:
-                if o.output is close:
-                    break
-            else:
-                self.link(v, close, Arc=Filter, filter=input)
-        return close
+    def __init__(self, *args, **kwargs):
+        k = 'register'
+        if k not in kwargs:
+            def filter(inputs):
+                outputs = []
+                for input in inputs:
+                    active = []
+                    for sock in input.keywords['items']:
+                        for state in sock.state, sock.next:
+                            if state in (sock.CLOSED, sock.ERROR,):
+                                break
+                        else:
+                            if not (sock.state == sock.START and sock.next is None):
+                                active.append(sock)
+                    if active:
+                        outputs.append(input.__class__(input.func, items=active))
+                if outputs:
+                    yield outputs
+            def register(inputs):
+                registry = {}
+                for input in inputs:
+                    for sock in input():
+                        events = 0
+                        for state in sock.state, sock.next:
+                            if state in (sock.CLOSED, sock.ERROR,):
+                                break
+                        else:
+                            if sock.LISTENING in (sock.state, sock.next,):
+                                events = polls.POLLIN
+                            elif not (sock.state == sock.START and sock.next is None):
+                                events = polls.POLLIN | polls.POLLOUT
+                        registry[sock] = events
+                return registry
+            pipe = operators.Pipeline(operators.FilterIn(fn=filter),
+                                      operators.Apply(fn=register),)
+            transition = self.Transition(pipe=pipe,)
+            kwargs[k] = transition
+        k = 'accept'
+        if k not in kwargs:
+            def filter(inputs):
+                outputs = []
+                for input in inputs:
+                    active = {}
+                    for sock, events in input.keywords['items'].iteritems():
+                        if sock.state == sock.LISTENING and events & polls.POLLIN:
+                            active[sock] = events
+                    if active:
+                        outputs.append(input.__class__(input.func, items=active))
+                if outputs:
+                    yield outputs
+            def accept(input):
+                try:
+                    accepted = input.accept()
+                except Exception as e:
+                    accepted = e
+                return accepted, input
+            pipe = operators.Pipeline(operators.FilterIn(fn=filter),
+                                      operators.Iter(),
+                                      operators.Call(),
+                                      operators.Iter(),
+                                      operators.Apply(fn=accept),)
+            transition = self.Transition(pipe=pipe,)
+            kwargs[k] = transition
+        k = 'close'
+        if k not in kwargs:
+            def filter(inputs):
+                outputs = []
+                for input in inputs:
+                    active = []
+                    socks = input.keywords['items']
+                    for sock in socks:
+                        if sock.CLOSED in (sock.state, sock.next,):
+                            continue
+                        active.append(sock)
+                    if active:
+                        outputs.append(input.__class__(input.func, items=active))
+                if outputs:
+                    yield outputs
+            def close(sock):
+                try:
+                    sock.close()
+                except Exception: # TODO
+                    pass
+                return sock
+            pipe = operators.Pipeline(operators.FilterIn(fn=filter),
+                                      operators.Iter(),
+                                      operators.Call(),
+                                      operators.Iter(),
+                                      operators.Apply(fn=close),)
+            transition = self.Transition(pipe=pipe,)
+            kwargs[k] = transition
+            
+        super(SocketPool, self).__init__(*args, **kwargs)
+        
+        # Arcs
+        for pair in ((self.sockets, self.register,), 
+                     (self.register, self.poll.input,),
+                     (self.poll.output, self.accept,),
+                     (self.sockets, self.close,),
+                     (self.poll.input, self.close,),
+                     (self.poll.output, self.close,),
+                     (self.close, self.sockets,),):
+            arc = self.Arc()
+            arc.link(*pair)
+        pair = (self.accept, self.sockets,)
+        def accepted(*args):
+            q = list(args)
+            while q:
+                item = q.pop(0)
+                if isinstance(item, socket.Socket):
+                    yield item
+                elif isinstance(item, (tuple, list)):
+                    q.extend(item)
+        pipe = operators.FilterOut(fn=accepted)
+        arc = Piped(pipe=pipe)
+        self.arcs.add(arc)
+        arc.link(*pair)
     
 #############################################################################
 #############################################################################
+
+Network = SocketPool
+
+#############################################################################
+#############################################################################
+
