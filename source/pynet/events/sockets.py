@@ -14,15 +14,31 @@ from . import polls
 #############################################################################
 #############################################################################
 
+class FilteredPool(pool.Pool):
+    
+    fn = trellis.attr(None)
+    
+    # filter out non-typed input
+    def send(self, *args):
+        filter = self.fn
+        q = list(args)
+        while q:
+            item = q.pop(0)
+            if filter(item):
+                self.add(item)
+            elif isinstance(item, (tuple, list)):
+                q.extend(item)
+        
+
+#############################################################################
+#############################################################################
+
 class SocketPolling(polls.Network):
     
-    input = trellis.make(None)
-    output = trellis.make(None)
+    input = trellis.make(lambda self: self.Condition())
+    output = trellis.make(lambda self: self.Condition())
     
     def __init__(self, *args, **kwargs):
-        for k in 'input', 'output':
-            if k not in kwargs:
-                kwargs[k] = self.Condition()
         super(SocketPolling, self).__init__(*args, **kwargs)
         for pair in ((self.input, self.poll), (self.poll, self.output,)):
             arc = self.Arc()
@@ -34,17 +50,27 @@ class SocketPolling(polls.Network):
 class Register(net.Transition):
     
     @staticmethod
+    def events(sock):
+        events = 0
+        for state in sock.state, sock.next:
+            if state in (sock.CLOSED, sock.ERROR,):
+                break
+        else:
+            if sock.LISTENING in (sock.state, sock.next,):
+                events = polls.POLLIN
+            elif not (sock.state == sock.START and sock.next is None):
+                events = polls.POLLIN | polls.POLLOUT
+        return events
+    
+    @staticmethod
     def filter(inputs):
         outputs = []
         for input in inputs:
             active = []
             for sock in input.keywords['items']:
-                for state in sock.state, sock.next:
-                    if state in (sock.CLOSED, sock.ERROR,):
-                        break
-                else:
-                    if not (sock.state == sock.START and sock.next is None):
-                        active.append(sock)
+                events = Register.events(sock)
+                if events:
+                    active.append(sock)
             if active:
                 outputs.append(input.__class__(input.func, items=active))
         if outputs:
@@ -55,15 +81,7 @@ class Register(net.Transition):
         registry = {}
         for input in inputs:
             for sock in input():
-                events = 0
-                for state in sock.state, sock.next:
-                    if state in (sock.CLOSED, sock.ERROR,):
-                        break
-                else:
-                    if sock.LISTENING in (sock.state, sock.next,):
-                        events = polls.POLLIN
-                    elif not (sock.state == sock.START and sock.next is None):
-                        events = polls.POLLIN | polls.POLLOUT
+                events = Register.events(sock)
                 registry[sock] = events
         return registry
     
@@ -154,14 +172,8 @@ class Close(net.Transition):
 #############################################################################
 #############################################################################
 
-class SocketPool(net.Network):
+class SocketIO(net.Network):
 
-    @trellis.modifier
-    def Condition(self, *args, **kwargs):
-        condition = pool.Pool(*args, **kwargs)
-        self.conditions.add(condition)
-        return condition
-    
     @trellis.modifier
     def Socket(self, *args, **kwargs):
         sock = socket.Socket.new(*args, **kwargs)
@@ -169,13 +181,19 @@ class SocketPool(net.Network):
         return sock
     
     poll = trellis.make(SocketPolling)
-    sockets = trellis.make(Condition)
+    sockets = trellis.make(lambda self: FilteredPool(fn=lambda x: isinstance(x, socket.Socket)))
     register = trellis.make(Register)
     accept = trellis.make(Accept)
     close = trellis.make(Close)
     
     def __init__(self, *args, **kwargs):
-        super(SocketPool, self).__init__(*args, **kwargs)
+        super(SocketIO, self).__init__(*args, **kwargs)
+        for condition in self.sockets,:
+            if condition not in self.conditions:
+                self.conditions.add(condition)
+        for transition in self.register, self.accept, self.close:
+            if transition not in self.transitions:
+                self.transitions.add(transition)
         
         #
         # links
@@ -193,16 +211,7 @@ class SocketPool(net.Network):
         arc = self.Arc()
         net.link(arc, input, transition)
         output = self.sockets
-        def accepted(*args):
-            q = list(args)
-            while q:
-                item = q.pop(0)
-                if isinstance(item, socket.Socket):
-                    yield item
-                elif isinstance(item, (tuple, list)):
-                    q.extend(item)
-        arc = operators.FilterOut(fn=accepted)
-        self.arcs.add(arc)
+        arc = self.Arc()
         net.link(arc, transition, output)
         
         transition = self.close
@@ -218,7 +227,7 @@ class SocketPool(net.Network):
 #############################################################################
 #############################################################################
 
-Network = SocketPool
+Network = SocketIO
 
 #############################################################################
 #############################################################################

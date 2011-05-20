@@ -295,7 +295,6 @@ class BufferStream(Bounded):
     
     @checked_bounds
     def write(self, writer, nbytes=None):
-        start = len(self.window)
         if nbytes is None:
             stop = None
             nbytes = self.free
@@ -304,15 +303,13 @@ class BufferStream(Bounded):
         elif nbytes < 0:
             raise ValueError(nbytes)
         else:
-            stop = start + nbytes
             if nbytes > self.free:
                 self.resize(stop * 2)
-        self.window >> nbytes
-        buf = self.window.view(slice(start, stop), readonly=False)
-        try:
-            nbytes = writer(buf)
-        finally:
-            self.window >> -len(buf)
+        window = Window(self.buffer)
+        window.start = self.window.stop
+        window.stop = window.start + nbytes
+        buf = window.view(readonly=False)
+        nbytes = writer(buf)
         if nbytes:
             if nbytes < 0 or nbytes > len(buf):
                 raise IndexError(nbytes)

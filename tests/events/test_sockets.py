@@ -19,9 +19,12 @@ from pynet.events.sockets import *
 #############################################################################
 
 class TestCaseSockets(unittest.TestCase):
+    
+    Network = SocketIO
+    
     def test_dgram(self, HOST='127.0.0.1', PORT=9000):
         
-        net = SocketPool()
+        net = self.Network()
         sock = net.Socket(socket.DATAGRAM)
         self.assertTrue(sock in net.sockets)
         
@@ -44,7 +47,7 @@ class TestCaseSockets(unittest.TestCase):
 
     def test_stream(self,):
         
-        net = SocketPool()
+        net = self.Network()
         listener = net.Socket(socket.STREAM)
         self.assertTrue(listener in net.sockets)
         
