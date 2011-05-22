@@ -77,21 +77,17 @@ class Register(net.Transition):
             yield outputs
     
     @staticmethod
-    def register(inputs):
-        registry = {}
-        for input in inputs:
-            for sock in input():
-                events = Register.events(sock)
-                registry[sock] = events
-        return registry
+    def register(input):
+        events = Register.events(input)
+        return (input, events)
     
     def __init__(self, *args, **kwargs):
-        k = 'pipe'
-        if k not in kwargs:
-            pipe = operators.Pipeline(operators.FilterIn(fn=self.filter),
-                                      operators.Apply(fn=self.register),)
-            kwargs[k] = pipe
         super(Register, self).__init__(*args, **kwargs)
+        self.pipe.append(operators.FilterIn(fn=self.filter))
+        self.pipe.append(operators.Iter())
+        self.pipe.append(operators.Call())
+        self.pipe.append(operators.Iter())
+        self.pipe.append(operators.Apply(fn=self.register))
 
 #############################################################################
 #############################################################################
@@ -200,19 +196,17 @@ class SocketIO(net.Network):
         #
         
         transition = self.register
-        input = self.sockets
-        output = self.poll.input
-        for pair in ((input, transition), (transition, output),):
+        for pair in ((self.poll.output, transition,),
+                     (self.sockets, transition,), 
+                     (transition, self.poll.input,),):
             arc = self.Arc()
             net.link(arc, *pair)
 
         transition = self.accept
-        input = self.poll.output
-        arc = self.Arc()
-        net.link(arc, input, transition)
-        output = self.sockets
-        arc = self.Arc()
-        net.link(arc, transition, output)
+        for pair in ((self.poll.output, transition,),
+                     (transition, self.sockets,),):
+            arc = self.Arc()
+            net.link(arc, *pair)
         
         transition = self.close
         outputs = (self.sockets,)

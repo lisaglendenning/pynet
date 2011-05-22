@@ -18,14 +18,24 @@ from ..io.poll import *
 class PollEvents(mapping.Mapping):
 
     @trellis.modifier
+    def send(self, item=None, items=None, **kwargs):
+        if item is not None:
+            self.update((item,),)
+        if items is not None:
+            self.update(items)
+    
+    @trellis.modifier
     def update(self, iterable):
         if isinstance(iterable, collections.Mapping):
             iterable = iterable.iteritems()
+        marking = self.marking
         for k,v in iterable:
-            if k in self:
-                self[k] |= v
+            for m in marking.to_change, marking.to_add, marking:
+                if k in m:
+                    m[k] |= v
+                    break
             else:
-                self[k] = v
+                marking[k] = v
 
     @trellis.modifier
     def pop(self, item,):
@@ -44,9 +54,20 @@ class PollEvents(mapping.Mapping):
 #############################################################################
 #############################################################################
 
-class Polls(collections.MutableMapping, net.Pipe):
+class Polls(net.Transition, collections.MutableMapping,):
     
     poller = trellis.make(Poller)
+    
+    def __init__(self, *args, **kwargs):
+        super(Polls, self).__init__(*args, **kwargs)
+        self.pipe.append(operators.Apply(fn=self.poll))
+        self.pipe.append(operators.Iter())
+
+    def __hash__(self):
+        return object.__hash__(self)
+    
+    def __eq__(self, other):
+        return self is other
     
     @trellis.compute
     def __len__(self,):
@@ -81,7 +102,7 @@ class Polls(collections.MutableMapping, net.Pipe):
         trellis.on_undo(*undo)
         
     @trellis.modifier
-    def send(self, inputs, *args, **kwargs):
+    def poll(self, inputs,):
         # update registry
         removed = set(self.keys())
         for thunk in inputs:
@@ -94,7 +115,7 @@ class Polls(collections.MutableMapping, net.Pipe):
                     self[k] = v
         for k in removed:
             del self[k]
-        super(Polls, self).send(self.poller.poll(), *args, **kwargs)
+        return self.poller.poll()
 
 #############################################################################
 #############################################################################
@@ -107,18 +128,13 @@ class Polling(net.Network):
         self.conditions.add(condition)
         return condition
     
-    poll = trellis.make(None)
+    @trellis.modifier
+    def Transition(self, *args, **kwargs):
+        transition = Polls(*args, **kwargs)
+        self.transitions.add(transition)
+        return transition
     
-    def __init__(self, *args, **kwargs):
-        if 'poll' not in kwargs:
-            pipe = Polls()
-            poll = self.Transition(pipe=pipe)
-            kwargs['poll'] = poll
-        super(Polling, self).__init__(*args, **kwargs)
-    
-    @trellis.compute
-    def __call__(self,):
-        return self.poll.__call__
+    poll = trellis.make(lambda self: self.Transition())
 
 #############################################################################
 #############################################################################

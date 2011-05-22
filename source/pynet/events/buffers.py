@@ -27,22 +27,30 @@ class BufferPool(sockets.FilteredPool):
     def next(self):
         r"""For lack of a better policy, return the MRU buffer."""
         if len(self):
-            return self.Event(self.pop)
-
-class BufferQueue(mapping.Mapping):
+            yield self.Event(self.pop)
     
-    fn = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer) and len(x.log) > 0)
+    @trellis.compute
+    def pop(self,):
+        return self.marking.pop
+
+class Queues(mapping.Mapping):
+    
+    key = trellis.attr(None)
+    filter = trellis.attr(None)
 
     @trellis.modifier
     def add(self, item,):
-        k = item.log[0].who
-        if k not in self.marking:
-            self.marking[k] = collections.deque()
-        self.marking[k].append(item)
+        k = self.key(item)
+        if k in self.marking:
+            self.marking[k].append(item)
+        else:
+            q = collections.deque()
+            q.append(item)
+            self.marking[k] = q
         
     @trellis.modifier
     def send(self, *args):
-        filter = self.fn
+        filter = self.filter
         q = list(args)
         while q:
             item = q.pop(0)
@@ -61,6 +69,11 @@ class BufferQueue(mapping.Mapping):
             raise KeyError(k)
         return self.marking[k].popleft()
 
+class BufferQueues(Queues):
+
+    key = trellis.attr(lambda x: x.log[0].who[0] if isinstance(x.log[0].who, tuple) else x.log[0].who)
+    filter = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer) and len(x.log) > 0)
+
 #############################################################################
 #############################################################################
 
@@ -71,20 +84,20 @@ class ToSend(operators.Multiplexer):
 
     def next(self, iterator=None, *args, **kwargs):
         # Input events
-        itr = self.pollout.next(*args, **kwargs)
+        itr = self.polled.next(*args, **kwargs)
         try:
             polled = itr.next()
         except StopIteration:
             return
-        itr = self.outq.next(*args, **kwargs)
+        itr = self.sending.next(*args, **kwargs)
         try:
-            outq = itr.next()
+            sending = itr.next()
         except StopIteration:
             return
         
         # filter sockets that are writable and have something to write
         events = polled.keywords['items']
-        qs = outq.keywords['items']
+        qs = sending.keywords['items']
         if iterator is None:
             iterator = qs
         else:
@@ -94,7 +107,7 @@ class ToSend(operators.Multiplexer):
             if sock not in qs or not qs[sock]:
                 continue
             inputs = (polled.__class__(polled.func, item=sock),
-                      outq.__class__(outq.func, item=sock),)
+                      sending.__class__(sending.func, item=sock),)
             yield inputs
 
 
@@ -106,7 +119,7 @@ class ToRecv(operators.Multiplexer):
 
     def next(self, iterator=None, *args, **kwargs):
         # Input events
-        itr = self.pollout.next(*args, **kwargs)
+        itr = self.polled.next(*args, **kwargs)
         try:
             polled = itr.next()
         except StopIteration:
@@ -146,7 +159,7 @@ class ToRecv(operators.Multiplexer):
 class Recv(net.Transition):
     
     @staticmethod
-    def recv(inputs, **kwargs):
+    def recvs(inputs, **kwargs):
         sock, buf = [i() for i in inputs]
         try:
             result = buf.recv(sock, **kwargs)
@@ -161,14 +174,14 @@ class Recv(net.Transition):
             kwargs[k] = mux
         k = 'pipe'
         if k not in kwargs:
-            pipe = operators.Apply(fn=self.recv)
+            pipe = operators.Apply(fn=self.recvs)
             kwargs[k] = pipe
         super(Recv, self).__init__(*args, **kwargs)
 
 class Send(net.Transition):
     
     @staticmethod
-    def send(inputs, **kwargs):
+    def sends(inputs, **kwargs):
         sock, buf = [i() for i in inputs]
         try:
             result = buf.send(**kwargs)
@@ -183,7 +196,7 @@ class Send(net.Transition):
             kwargs[k] = mux
         k = 'pipe'
         if k not in kwargs:
-            pipe = operators.Apply(fn=self.send)
+            pipe = operators.Apply(fn=self.sends)
             kwargs[k] = pipe
         super(Send, self).__init__(*args, **kwargs)
 
@@ -194,8 +207,8 @@ class SocketBufferIO(sockets.Network):
     bufsize = trellis.attr(sockbuf.MTU)
     
     free = trellis.make(BufferPool)
-    sending = trellis.make(BufferQueue)
-    received = trellis.make(BufferQueue)
+    sending = trellis.make(BufferQueues)
+    received = trellis.make(BufferQueues)
     recv = trellis.make(Recv)
     send = trellis.make(Send)
     
@@ -226,7 +239,7 @@ class SocketBufferIO(sockets.Network):
         for attr, input in inputs:
             arc = self.Arc()
             net.link(arc, input, transition,)
-            setattr(transition, attr, arc)
+            setattr(transition.mux, attr, arc)
         outputs = self.sockets, self.received, self.free
         for output in outputs:
             arc = self.Arc()
@@ -237,7 +250,7 @@ class SocketBufferIO(sockets.Network):
         for attr, input in inputs:
             arc = self.Arc()
             net.link(arc, input, transition,)
-            setattr(transition, attr, arc)
+            setattr(transition.mux, attr, arc)
         outputs = self.sockets, self.sending, self.free
         for output in outputs:
             arc = self.Arc()

@@ -34,6 +34,10 @@ class OrderedSet(collections.MutableSet, trellis.Component):
     def __contains__(self):
         return self.map.__contains__
     
+    def __str__(self):
+        items = list(self)
+        return "OrderedSet(%s)" % str(items)
+    
     def __getitem__(self, index):
         if index < 0 or index >= len(self):
             raise IndexError(index)

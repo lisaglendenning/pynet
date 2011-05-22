@@ -62,12 +62,8 @@ class TestCaseSockets(unittest.TestCase):
         self.assertTrue(connector in net.sockets)
         
         connector.connect(listener.bound)
-        
-        for i in net.close.inputs:
-            print "IN", i.input
-        for o in net.close.outputs:
-            print "OUT", o.output
-        net.poll(None)
+
+        net.poll()
         self.assertTrue(listener not in net.poll.input)
         self.assertTrue(listener in net.poll.output)
         self.assertTrue(net.poll.output[listener] & polls.POLLIN)
@@ -81,7 +77,7 @@ class TestCaseSockets(unittest.TestCase):
         for i in xrange(len(net.sockets)):
             try:
                 net.close()
-            except RuntimeError:
+            except StopIteration:
                 break
         
         self.assertEqual(len(net.sockets), 3)

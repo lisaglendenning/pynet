@@ -44,12 +44,8 @@ class SocketBuffer(collections.namedtuple('SocketBuffer', ('buffer', 'log',),)):
                 args = (buf, flags,)
             else:
                 args = (buf, flags, address,)
-            result = sock.send(*args)
-            if isinstance(result, tuple):
-                for x in result:
-                    yield x
-            else:
-                yield result
+            nbytes = sock.send(*args)
+            yield nbytes
         writer = coroutine(sock, *args, **kwargs)
         writer.next()
         return writer
@@ -57,7 +53,13 @@ class SocketBuffer(collections.namedtuple('SocketBuffer', ('buffer', 'log',),)):
     def __new__(cls, buffer, log=None):
         if log is None:
             log = collections.deque()
-        super(SocketBuffer, cls).__new__(cls, buffer, log)
+        return super(SocketBuffer, cls).__new__(cls, buffer, log)
+    
+    def __hash__(self):
+        return hash(self.buffer)
+    
+    def __eq__(self, other):
+        return self.buffer is other.buffer
     
     def append(self, desc):
         # combine adjacent entries with the same who
