@@ -76,6 +76,13 @@ class TestCaseSockets(unittest.TestCase):
         # it should only take up to N events to close all sockets
         for i in xrange(len(net.sockets)):
             try:
+                net.shutdown()
+            except StopIteration:
+                break
+            
+        # it should only take up to N events to close all sockets
+        for i in xrange(len(net.sockets)):
+            try:
                 net.close()
             except StopIteration:
                 break

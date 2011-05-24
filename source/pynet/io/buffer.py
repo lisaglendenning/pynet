@@ -21,8 +21,8 @@ import functools
 
 class Bounded(object):
     
-    start = None
-    stop = None
+    start = 0
+    stop = 0
     
     def __len__(self):
         return self.stop - self.start
@@ -51,6 +51,8 @@ class Bounded(object):
 ##############################################################################
 
 class Buffer(Bounded):
+    
+    __slots__ = ()
     
     array = staticmethod(ctypes.create_string_buffer)
 
@@ -116,6 +118,8 @@ class Buffer(Bounded):
 class Window(Buffer):
     """Controls access to a fixed range of a buffer.
     """
+    
+    __slots__ = ()
     
     start = 0
     stop = 0

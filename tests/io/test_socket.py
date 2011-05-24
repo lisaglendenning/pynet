@@ -89,9 +89,10 @@ class TestCaseSocket(unittest.TestCase):
 
         for connector, acceptor in zip(connectors, acceptors):
             for sock in acceptor, connector:
-                sock.socket.settimeout(None)
-                sock.close()
-                self.assertEqual(sock.state, recver.CLOSED)
+                if sock.state != sock.CLOSED:
+                    sock.socket.settimeout(None)
+                    sock.close()
+                    self.assertEqual(sock.state, sock.CLOSED)
             
 #############################################################################
 #############################################################################

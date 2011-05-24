@@ -34,6 +34,9 @@ class Dispatch(collections.MutableMapping, trellis.Component):
     @trellis.compute
     def __len__(self,):
         return self.keys.__len__
+  
+    def __nonzero__(self):
+        return len(self) > 0
 
     @trellis.compute
     def __iter__(self,):

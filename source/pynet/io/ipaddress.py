@@ -10,6 +10,8 @@ History
 
 """
 
+from __future__ import absolute_import
+
 
 import socket
 import struct
@@ -24,7 +26,7 @@ class IPAddress(tuple):
     
     FAMILY = socket.AF_INET
     
-    LOCALHOST = '127.0.0.1'
+    LOCALHOST = '0.0.0.0'
 
     @classmethod
     def from_string(cls, text):
@@ -77,16 +79,30 @@ class IPAddress(tuple):
     
     __slots__ = ()
 
-    def __new__(cls, ipaddr):
-        if isinstance(ipaddr, tuple):
-            if not (isinstance(ipaddr[0], str) and isinstance(ipaddr[1], int)):
-                raise TypeError(ipaddr)
-        elif isinstance(ipaddr, str):
-            ipaddr = cls.from_string(ipaddr)
-        elif isinstance(ipaddr, (int, long)):
-            ipaddr = cls.from_numeric(ipaddr)
+    def __new__(cls, *args, **kwargs):
+        if args:
+            if len(args) == 2:
+                ipaddr = args
+            elif len(args) == 1:
+                arg = args[0]
+                if isinstance(arg, tuple):
+                    ipaddr = arg
+                elif isinstance(arg, str):
+                    ipaddr = cls.from_string(arg)
+                elif isinstance(arg, (int, long)):
+                    ipaddr = cls.from_numeric(arg)
+                else:
+                    raise ValueError(ipaddr)
+            else:
+                raise ValueError(args)
+        elif kwargs:
+            ip = kwargs.get('ip', cls.LOCALHOST)
+            port = kwargs.get('port', 0)
+            ipaddr = (ip, port)
         else:
-            raise ValueError(ipaddr)
+            ipaddr = (cls.LOCALHOST, 0)
+        if not (len(ipaddr) == 2 and isinstance(ipaddr[0], str) and isinstance(ipaddr[1], int)):
+            raise TypeError(ipaddr)
         return tuple.__new__(cls, ipaddr)
 
     def __int__(self):

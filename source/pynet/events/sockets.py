@@ -3,6 +3,8 @@
 
 from __future__ import absolute_import
 
+import itertools
+
 from peak.events import trellis
 
 from pypetri import net
@@ -16,11 +18,11 @@ from . import polls
 
 class FilteredPool(pool.Pool):
     
-    fn = trellis.attr(None)
+    filter = trellis.attr(None)
     
-    # filter out non-typed input
+    # filter input
     def send(self, *args):
-        filter = self.fn
+        filter = self.filter
         q = list(args)
         while q:
             item = q.pop(0)
@@ -28,7 +30,6 @@ class FilteredPool(pool.Pool):
                 self.add(item)
             elif isinstance(item, (tuple, list)):
                 q.extend(item)
-        
 
 #############################################################################
 #############################################################################
@@ -47,7 +48,29 @@ class SocketPolling(polls.Network):
 #############################################################################
 #############################################################################
 
-class Register(net.Transition):
+class ItemTransition(net.Transition):
+
+    select = trellis.attr(None)
+    apply = trellis.attr(None)
+
+    def __init__(self, *args, **kwargs):
+        k = 'pipe'
+        if k not in kwargs:
+            pipe = operators.Pipeline(operators.Iter(),
+                                      operators.Call(),
+                                      operators.Iter(),
+                                      operators.Apply(fn=self.apply),)
+            kwargs[k] = pipe
+        super(ItemTransition, self).__init__(*args, **kwargs)
+    
+    def next(self, *args, **kwargs):
+        for event in super(ItemTransition, self).next(*args, select=self.select, **kwargs):
+            yield event
+        
+#############################################################################
+#############################################################################
+
+class Register(ItemTransition):
     
     @staticmethod
     def events(sock):
@@ -63,112 +86,95 @@ class Register(net.Transition):
         return events
     
     @staticmethod
-    def filter(inputs):
-        outputs = []
-        for input in inputs:
-            active = []
-            for sock in input.keywords['items']:
-                events = Register.events(sock)
-                if events:
-                    active.append(sock)
-            if active:
-                outputs.append(input.__class__(input.func, items=active))
-        if outputs:
-            yield outputs
+    def select(marking):
+        active = []
+        for sock in marking:
+            events = Register.events(sock)
+            if events:
+                active.append(sock)
+        if active:
+            yield active
     
     @staticmethod
-    def register(input):
+    def apply(input):
         events = Register.events(input)
         return (input, events)
-    
-    def __init__(self, *args, **kwargs):
-        super(Register, self).__init__(*args, **kwargs)
-        self.pipe.append(operators.FilterIn(fn=self.filter))
-        self.pipe.append(operators.Iter())
-        self.pipe.append(operators.Call())
-        self.pipe.append(operators.Iter())
-        self.pipe.append(operators.Apply(fn=self.register))
 
 #############################################################################
 #############################################################################
 
-class Accept(net.Transition):
+class Accept(ItemTransition):
     
     @staticmethod
-    def filter(inputs):
-        outputs = []
-        for input in inputs:
-            active = {}
-            for sock, events in input.keywords['items'].iteritems():
-                if sock.state == sock.LISTENING and events & polls.POLLIN:
-                    active[sock] = events
-            if active:
-                outputs.append(input.__class__(input.func, items=active))
-        if outputs:
-            yield outputs
+    def select(marking):
+        islistening = lambda (x,y): ((x.state == x.START and x.next == x.LISTENING) \
+                                  or (x.state == x.LISTENING and x.next not in (x.CLOSED, x.ERROR,))) \
+                                 and (y & polls.POLLIN)
+        acceptable = [x[0] for x in itertools.ifilter(islistening, marking.iteritems())]
+        if acceptable:
+            yield acceptable
     
     @staticmethod
-    def accept(input):
+    def apply(input):
         try:
             accepted = input.accept()
-        except Exception as e:
-            accepted = e
-        return accepted, input
-
-    def __init__(self, *args, **kwargs):
-        k = 'pipe'
-        if k not in kwargs:
-            pipe = operators.Pipeline(operators.FilterIn(fn=self.filter),
-                                      operators.Iter(),
-                                      operators.Call(),
-                                      operators.Iter(),
-                                      operators.Apply(fn=self.accept),)
-            kwargs[k] = pipe
-        super(Accept, self).__init__(*args, **kwargs)
+        except IOError:
+            return input
+        else:
+            return accepted, input
 
 #############################################################################
 #############################################################################
 
-class Close(net.Transition):
+class Shutdown(ItemTransition):
     
     @staticmethod
-    def filter(inputs):
-        outputs = []
-        for input in inputs:
-            active = []
-            socks = input.keywords['items']
-            for sock in socks:
-                if sock.CLOSED in (sock.state, sock.next,):
-                    continue
-                active.append(sock)
-            if active:
-                outputs.append(input.__class__(input.func, items=active))
-        if outputs:
-            yield outputs
+    def select(marking):
+        isstream = lambda x: x.transport == socket.STREAM
+        isopen = lambda x: (x.state in (x.START, x.CONNECTING, x.CONNECTED,)) \
+                            and (x.next not in (x.CLOSED, x.CLOSING, x.ERROR,))
+        filtered = itertools.ifilter(isopen, itertools.ifilter(isstream, marking))
+        active = [x for x in filtered]
+        if active:
+            yield active
          
     @staticmethod   
-    def close(sock):
+    def apply(sock, *args, **kwargs):
         try:
-            sock.close()
-        except Exception: # TODO
+            sock.shutdown(*args, **kwargs)
+        except IOError: # TODO
             pass
         return sock
 
-    def __init__(self, *args, **kwargs):
-        k = 'pipe'
-        if k not in kwargs:
-            pipe = operators.Pipeline(operators.FilterIn(fn=self.filter),
-                                      operators.Iter(),
-                                      operators.Call(),
-                                      operators.Iter(),
-                                      operators.Apply(fn=self.close),)
-            kwargs[k] = pipe
-        super(Close, self).__init__(*args, **kwargs)
+#############################################################################
+#############################################################################
+
+class Close(ItemTransition):
+    
+    @staticmethod
+    def select(marking):
+        isopen = lambda x: x.CLOSED not in (x.state, x.next,)
+        active = [x for x in itertools.ifilter(isopen, marking)]
+        if active:
+            yield active
+         
+    @staticmethod   
+    def apply(sock):
+        try:
+            sock.close()
+        except IOError: # TODO
+            pass
+        return sock
 
 #############################################################################
 #############################################################################
 
 class SocketIO(net.Network):
+    
+    def Transition(self, transition):
+        if transition not in self.transitions:
+            self.transitions.add(transition)
+        return transition
 
     @trellis.modifier
     def Socket(self, *args, **kwargs):
@@ -176,20 +182,34 @@ class SocketIO(net.Network):
         self.sockets.add(sock)
         return sock
     
+    @trellis.modifier
+    def Sockets(self):
+        condition = FilteredPool(filter=lambda x: isinstance(x, socket.Socket))
+        self.conditions.add(condition)
+        return condition
+    
     poll = trellis.make(SocketPolling)
-    sockets = trellis.make(lambda self: FilteredPool(fn=lambda x: isinstance(x, socket.Socket)))
-    register = trellis.make(Register)
-    accept = trellis.make(Accept)
-    close = trellis.make(Close)
+    sockets = trellis.make(Sockets)
+    
+    # FIXME: DRY
+    @trellis.maintain(make=Register)
+    def register(self):
+        return self.Transition(self.register)
+    
+    @trellis.maintain(make=Accept)
+    def accept(self):
+        return self.Transition(self.accept)
+    
+    @trellis.maintain(make=Shutdown)
+    def shutdown(self):
+        return self.Transition(self.shutdown)
+    
+    @trellis.maintain(make=Close)
+    def close(self):
+        return self.Transition(self.close)
     
     def __init__(self, *args, **kwargs):
         super(SocketIO, self).__init__(*args, **kwargs)
-        for condition in self.sockets,:
-            if condition not in self.conditions:
-                self.conditions.add(condition)
-        for transition in self.register, self.accept, self.close:
-            if transition not in self.transitions:
-                self.transitions.add(transition)
         
         #
         # links
@@ -208,15 +228,15 @@ class SocketIO(net.Network):
             arc = self.Arc()
             net.link(arc, *pair)
         
-        transition = self.close
-        outputs = (self.sockets,)
-        inputs = (self.sockets, self.poll.input, self.poll.output,)
-        for input in inputs:
-            arc = self.Arc()
-            net.link(arc, input, transition)
-        for output in outputs:
-            arc = self.Arc()
-            net.link(arc, transition, output)
+        for transition in (self.close, self.shutdown,):
+            outputs = (self.sockets,)
+            inputs = (self.sockets, self.poll.input, self.poll.output,)
+            for input in inputs:
+                arc = self.Arc()
+                net.link(arc, input, transition)
+            for output in outputs:
+                arc = self.Arc()
+                net.link(arc, transition, output)
 
 #############################################################################
 #############################################################################

@@ -62,7 +62,7 @@ class TestCaseSockets(unittest.TestCase):
         data = 'hi'
         msg = Message('hi')
         buf.write(msg.write, (sender, receiver.bound), len(data))
-        self.assertEqual(net.free.pull(buf), buf)
+        self.assertEqual(net.free.marking.pop(), buf)
         net.sending.add(buf)
         self.assertTrue(sender in net.sending)
 
@@ -100,13 +100,13 @@ class TestCaseSockets(unittest.TestCase):
         net.recv()
         self.assertEqual(len(buf.buffer), len(data))
         self.assertTrue(receiver in net.sockets)
-        self.assertTrue(receiver in net.received)
+        self.assertTrue(receiver in net.receiving)
         
         #
         # read
         #
         
-        self.assertEqual(net.received.pop(receiver), buf)
+        self.assertEqual(net.receiving.pop(receiver), buf)
         result = buf.read(msg.read)
         self.assertEqual(msg.buffer, data)
         self.assertTrue(isinstance(result, sockbuf.BufferDescriptor))
@@ -162,7 +162,7 @@ class TestCaseSockets(unittest.TestCase):
         data = 'hi'
         msg = Message('hi')
         buf.write(msg.write, acceptor, len(data))
-        self.assertEqual(net.free.pull(buf), buf)
+        self.assertEqual(net.free.marking.pop(), buf)
         net.sending.add(buf)
         self.assertTrue(acceptor in net.sending)
 
@@ -200,13 +200,13 @@ class TestCaseSockets(unittest.TestCase):
         net.recv()
         self.assertEqual(len(buf.buffer), len(data))
         self.assertTrue(connector in net.sockets)
-        self.assertTrue(connector in net.received)
+        self.assertTrue(connector in net.receiving)
         
         #
         # read
         #
         
-        self.assertEqual(net.received.pop(connector), buf)
+        self.assertEqual(net.receiving.pop(connector), buf)
         result = buf.read(msg.read)
         self.assertEqual(msg.buffer, data)
         self.assertTrue(isinstance(result, sockbuf.BufferDescriptor))

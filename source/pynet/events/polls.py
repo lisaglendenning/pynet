@@ -59,9 +59,12 @@ class Polls(net.Transition, collections.MutableMapping,):
     poller = trellis.make(Poller)
     
     def __init__(self, *args, **kwargs):
+        k = 'pipe'
+        if k not in kwargs:
+            pipe = operators.Pipeline(operators.Apply(fn=self.poll),
+                                      operators.Iter(),)
+            kwargs[k] = pipe
         super(Polls, self).__init__(*args, **kwargs)
-        self.pipe.append(operators.Apply(fn=self.poll))
-        self.pipe.append(operators.Iter())
 
     def __hash__(self):
         return object.__hash__(self)
@@ -102,11 +105,11 @@ class Polls(net.Transition, collections.MutableMapping,):
         trellis.on_undo(*undo)
         
     @trellis.modifier
-    def poll(self, inputs,):
+    def poll(self, inputs, *args, **kwargs):
         # update registry
         removed = set(self.keys())
         for thunk in inputs:
-            registry = thunk()
+            registry = thunk(*args, **kwargs)
             for k,v in registry.iteritems():
                 if k in self:
                     removed.remove(k)

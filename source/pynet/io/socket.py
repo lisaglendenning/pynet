@@ -9,6 +9,8 @@ import weakref
 
 from peak.events import trellis
 
+from .ipaddress import *
+
 #############################################################################
 #############################################################################
 
@@ -22,9 +24,9 @@ TRANSPORTS = [DATAGRAM, STREAM,]
 class Socket(trellis.Component):
     """Wraps a socket with a simple state machine."""
     
-    NONE = ('0.0.0.0', 0)
+    Address = IPAddress
     
-    SOCK_FAMILY = socket.AF_INET
+    SOCK_FAMILY = Address.FAMILY
     SOCK_TRANSPORTS = { DATAGRAM: socket.SOCK_DGRAM, 
                         STREAM: socket.SOCK_STREAM,
                        }
@@ -76,6 +78,22 @@ class Socket(trellis.Component):
             state = self.START
         super(Socket, self).__init__(socket=sock, state=state, **kwargs)
     
+    @trellis.compute
+    def __hash__(self):
+        return self.socket.__hash__
+    
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.socket == other.socket
+
+# python doesn't seem to have SO_NREAD :-(
+#    @property
+#    def flushed(self):
+#        nread = self.getsockopt(socket.SOL_SOCKET, socket.SO_NREAD)
+#        nwrite = self.getsockopt(socket.SOL_SOCKET, socket.SO_NWRITE)
+#        return nread == 0 and nwrite == 0
+    
     @trellis.maintain
     def state(self):
         prev = self.state
@@ -85,13 +103,12 @@ class Socket(trellis.Component):
         return prev
     
     @trellis.compute
-    def __hash__(self):
-        return self.socket.__hash__
+    def getsockopt(self):
+        return self.socket.getsockopt
     
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        return self.socket == other.socket
+    @trellis.compute
+    def setsockopt(self):
+        return self.socket.setsockopt
     
     @trellis.compute
     def fileno(self):
@@ -114,9 +131,11 @@ class Socket(trellis.Component):
     
     def _bound(self,):
         try:
-            return self.socket.getsockname()
+            addr = self.socket.getsockname()
         except IOError:
             return None
+        else:
+            return self.Address(addr)
         
     @trellis.compute
     def bound(self):
@@ -225,9 +244,11 @@ class StreamSocket(Socket):
         
     def _connected(self):
         try:
-            return self.socket.getpeername()
+            addr = self.socket.getpeername()
         except IOError:
             return None
+        else:
+            return self.Address(addr)
     
     @trellis.compute
     def connected(self):
@@ -265,7 +286,8 @@ class StreamSocket(Socket):
                     raise
             else:
                 sock = self.__class__(sock=result[0], state=self.CONNECTED)
-                return sock, result[1]
+                addr = self.Address(result[1])
+                return sock, addr
             return None
         return self.performs(wrapper)
     
@@ -327,9 +349,12 @@ class StreamSocket(Socket):
             try:
                 f(*args, **kwargs)
             except socket.error as e:
-                if e.errno != errno.ENOTCONN:
+                if e.errno == errno.ENOTCONN:
+                    self.next = self.CLOSED
+                else:
                     raise
-            self.next = self.CLOSING
+            else:
+                self.next = self.CLOSING
         return self.performs(wrapper)
 
 #############################################################################
