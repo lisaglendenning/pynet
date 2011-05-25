@@ -4,6 +4,7 @@
 from __future__ import absolute_import
 
 import itertools
+import collections
 
 from peak.events import trellis
 
@@ -16,20 +17,40 @@ from . import polls
 #############################################################################
 #############################################################################
 
+def flatten(arg, filter=None, types=(list, tuple,)):
+    if filter is None:
+        filter = lambda x: not isinstance(x, types)
+    if filter(arg):
+        yield arg
+        return
+    iterable = iter(arg)
+    while True:
+        try:
+            i = iterable.next()
+        except StopIteration:
+            return
+        if filter(i):
+            yield i
+        elif isinstance(i, types):
+            try:
+                i = iter(i)
+            except TypeError:
+                pass
+            else:
+                iterable = itertools.chain(i, iterable)
+
+#############################################################################
+#############################################################################
+
 class FilteredPool(pool.Pool):
     
     filter = trellis.attr(None)
     
-    # filter input
-    def send(self, *args):
+    # flattens and filters input
+    def update(self, arg, **kwargs):
         filter = self.filter
-        q = list(args)
-        while q:
-            item = q.pop(0)
-            if filter(item):
-                self.add(item)
-            elif isinstance(item, (tuple, list)):
-                q.extend(item)
+        for item in flatten(arg, filter, **kwargs):
+            self.add(item)
 
 #############################################################################
 #############################################################################
@@ -48,7 +69,19 @@ class SocketPolling(polls.Network):
 #############################################################################
 #############################################################################
 
-class ItemTransition(net.Transition):
+class SelectTransition(net.Transition):
+    
+    @staticmethod
+    def forall(type):
+        def outer(f):
+            def wrapper(input, *args, **kwargs):
+                if isinstance(input, type):
+                    output = f(input, *args, **kwargs)
+                else:
+                    output = [f(i, *args, **kwargs) for i in input]
+                return output
+            return wrapper
+        return outer
 
     select = trellis.attr(None)
     apply = trellis.attr(None)
@@ -58,19 +91,25 @@ class ItemTransition(net.Transition):
         if k not in kwargs:
             pipe = operators.Pipeline(operators.Iter(),
                                       operators.Call(),
-                                      operators.Iter(),
                                       operators.Apply(fn=self.apply),)
             kwargs[k] = pipe
-        super(ItemTransition, self).__init__(*args, **kwargs)
+        super(SelectTransition, self).__init__(*args, **kwargs)
     
-    def next(self, *args, **kwargs):
-        for event in super(ItemTransition, self).next(*args, select=self.select, **kwargs):
+    def next(self, select=None, *args, **kwargs):
+        if select is None:
+            filtered = self.select
+        else:
+            def filtered(m):
+                for x in self.select(m):
+                    for y in select(x):
+                        yield y
+        for event in super(SelectTransition, self).next(*args, select=filtered, **kwargs):
             yield event
         
 #############################################################################
 #############################################################################
 
-class Register(ItemTransition):
+class Register(SelectTransition):
     
     @staticmethod
     def events(sock):
@@ -96,6 +135,7 @@ class Register(ItemTransition):
             yield active
     
     @staticmethod
+    @SelectTransition.forall(socket.Socket)
     def apply(input):
         events = Register.events(input)
         return (input, events)
@@ -103,7 +143,7 @@ class Register(ItemTransition):
 #############################################################################
 #############################################################################
 
-class Accept(ItemTransition):
+class Accept(SelectTransition):
     
     @staticmethod
     def select(marking):
@@ -115,18 +155,20 @@ class Accept(ItemTransition):
             yield acceptable
     
     @staticmethod
+    @SelectTransition.forall(socket.Socket)
     def apply(input):
         try:
             accepted = input.accept()
         except IOError:
-            return input
+            output = input
         else:
-            return accepted, input
+            output = (accepted, input,)
+        return output
 
 #############################################################################
 #############################################################################
 
-class Shutdown(ItemTransition):
+class Shutdown(SelectTransition):
     
     @staticmethod
     def select(marking):
@@ -138,7 +180,8 @@ class Shutdown(ItemTransition):
         if active:
             yield active
          
-    @staticmethod   
+    @staticmethod
+    @SelectTransition.forall(socket.Socket)
     def apply(sock, *args, **kwargs):
         try:
             sock.shutdown(*args, **kwargs)
@@ -149,7 +192,7 @@ class Shutdown(ItemTransition):
 #############################################################################
 #############################################################################
 
-class Close(ItemTransition):
+class Close(SelectTransition):
     
     @staticmethod
     def select(marking):
@@ -158,7 +201,8 @@ class Close(ItemTransition):
         if active:
             yield active
          
-    @staticmethod   
+    @staticmethod
+    @SelectTransition.forall(socket.Socket)
     def apply(sock):
         try:
             sock.close()
@@ -190,8 +234,7 @@ class SocketIO(net.Network):
     
     poll = trellis.make(SocketPolling)
     sockets = trellis.make(Sockets)
-    
-    # FIXME: DRY
+
     @trellis.maintain(make=Register)
     def register(self):
         return self.Transition(self.register)

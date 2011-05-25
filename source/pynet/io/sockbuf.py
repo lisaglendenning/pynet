@@ -14,7 +14,8 @@ MTU = 2**16 # TODO
 #############################################################################
 #############################################################################
 
-BufferDescriptor = collections.namedtuple('BufferDescriptor', ('nbytes', 'who',),)
+Connection = collections.namedtuple('Connection', ('local', 'remote',),)
+BufferDescriptor = collections.namedtuple('BufferDescriptor', ('nbytes', 'connection',),)
 
 #############################################################################
 #############################################################################
@@ -62,10 +63,14 @@ class SocketBuffer(collections.namedtuple('SocketBuffer', ('buffer', 'log',),)):
         return self.buffer is other.buffer
     
     def append(self, desc):
-        # combine adjacent entries with the same who
+        if not isinstance(desc, BufferDescriptor):
+            raise TypeError(desc)
+        if desc.nbytes < 0:
+            raise ValueError(desc)
+        # combine adjacent entries with the same connection
         if self.log:
             last = self.log[-1]
-            if last.who == desc.who:
+            if last.connection == desc.connection:
                 self.log[-1] = last._replace(nbytes=(last.nbytes + desc.nbytes))
                 return
         self.log.append(desc)
@@ -96,42 +101,44 @@ class SocketBuffer(collections.namedtuple('SocketBuffer', ('buffer', 'log',),)):
         self.append(desc)
         return desc
     
-    def recv(self, who, nbytes=None, **kwargs):
-        coroutine = self.reader(who, **kwargs)
+    def recv(self, connection, nbytes=None, **kwargs):
+        coroutine = self.reader(connection, **kwargs)
         nbytes = self.buffer.write(coroutine.send, nbytes)
         try:
             addr = coroutine.next()
         except StopIteration:
             pass
         else:
-            who = (who, addr)
-        desc = BufferDescriptor(nbytes, who)
+            connection = Connection(connection, addr)
+        desc = BufferDescriptor(nbytes, connection)
         self.append(desc)
         return desc
     
-    def send(self, who=None, nbytes=None, **kwargs):
+    def send(self, connection=None, nbytes=None, **kwargs):
         log = self.log
         if log:
             first = log[0]
         else:
             first = None
-        if who is None:
-            if first is None or first.who is None:
-                raise ValueError(who)
-            who = first.who
+        if connection is None:
+            if first is None or first.connection is None:
+                raise ValueError(connection)
+            connection = first.connection
         else: # sanity check?
-            if first is not None and first.who is not None and who != first.who:
-                raise ValueError(who)
+            if first is not None\
+             and first.connection is not None \
+             and connection != first.connection:
+                raise ValueError(connection)
         if nbytes is None:
             if first is not None:
                 nbytes = first.nbytes
         else:
             if first is not None and nbytes > first.nbytes:
                 nbytes = first.nbytes
-        if isinstance(who, tuple):
-            who, addr = who
+        if isinstance(connection, Connection):
+            connection, addr = connection
             kwargs['address'] = addr
-        coroutine = self.writer(who, **kwargs)
+        coroutine = self.writer(connection, **kwargs)
         nbytes = self.buffer.read(coroutine.send, nbytes)
         if first is not None:
             if nbytes == first.nbytes:

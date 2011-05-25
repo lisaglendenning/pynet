@@ -13,6 +13,8 @@ History
 
 import unittest
 
+import collections
+
 from pynet.events.buffers import *
 
 #############################################################################
@@ -20,99 +22,89 @@ from pynet.events.buffers import *
 
 class Message(object):
     
-    def __init__(self, data):
-        self.data = data
-        self.buffer = None
+    def __init__(self,):
+        self.reading = None
     
-    def read(self, buf):
-        data = buf[:]
-        self.buffer = data
-        return len(data)
+    def read(self, who=None, nbytes=None):
+        def reader(who=None, nbytes=None):
+            next = Demand(who, nbytes)
+            while True:
+                buf = yield next
+                reading = buf[:]
+                self.reading = reading
+                desc = yield len(reading)
+        r = reader(who, nbytes)
+        return r
     
-    def write(self, buf):
-        data = self.data
-        buf[:] = data
-        return len(data)
+    def write(self, writing, who=None):
+        def writer(writing, who=None):
+            nbytes = len(writing)
+            next = Demand(who, nbytes)
+            while True:
+                buf = yield next
+                buf[:] = writing
+                desc = yield nbytes
+        w = writer(writing, who)
+        return w
 
 class TestCaseSockets(unittest.TestCase):
     
     Network = Network
     
-    def test_dgram(self, HOST='127.0.0.1', PORT=9000):
+    @staticmethod
+    def select(k):
+        def fn(m):
+            if isinstance(m, collections.Mapping):
+                if k in m:
+                    yield (k, m[k])
+            elif isinstance(m, tuple) and len(m) == 2:
+                if k is m[0]:
+                    yield m
+            else:
+                output = [x for x in m if (isinstance(x, tuple) and k is x[0]) or (k is x)]
+                if output:
+                    if len(output) == 1:
+                        output = output[0]
+                    yield output
+        return fn
+    
+    def test_dgram(self, NSOCKS=2, PORT=9000):
         
         net = self.Network()
         
-        #
-        # connect
-        #
-        
-        socks = [net.Socket(socket.DATAGRAM) for i in xrange(2)]
-        receiver, sender = socks
-        for i,sock in enumerate(socks):
-            sock.socket.settimeout(None)
-            sock.bind((HOST, PORT+i))
-
-        #
-        # write
-        #
-
         buf = net.Buffer()
         self.assertTrue(buf in net.free)
         
         data = 'hi'
-        msg = Message('hi')
-        buf.write(msg.write, (sender, receiver.bound), len(data))
-        self.assertEqual(net.free.marking.pop(), buf)
-        net.sending.add(buf)
-        self.assertTrue(sender in net.sending)
 
         #
-        # send
+        # connect
         #
-
-        for i in xrange(2):
-            if sender in net.poll.input:
-                break
-            net.register()
+        
+        socks = [net.Socket(socket.DATAGRAM) for i in xrange(NSOCKS)]
+        for i,sock in enumerate(socks):
+            sock.socket.settimeout(None)
+            sock.bind(sock.Address(port=PORT+i))
+                
+        for i in xrange(0, NSOCKS, 2):
             
-        for i in xrange(2):
-            if sender in net.poll.output:
-                break
-            net.poll()
+            receiver, sender = socks[i:i+2]
+            
+            #
+            # callbacks
+            #
+            
+            connection = sockbuf.Connection(sender, receiver.bound)
+            msg = Message()
+            for cb, condition in ((msg.write(data, connection), net.writing,),
+                                  (msg.read(receiver), net.reading,),):
+                next = cb.next()
+                consumer = Consumer(caller=cb, next=next)
+                condition.send(consumer)
+                self.assertTrue(consumer in condition.values())
 
-        net.send()
-        self.assertTrue(buf in net.free)
-        self.assertTrue(sender in net.sockets)
-
-        #
-        # receive
-        #
-        
-        for i in xrange(2):
-            if receiver in net.poll.input:
-                break
-            net.register()
-        for i in xrange(2):
-            if receiver in net.poll.output:
-                break
-            net.poll()
-        
-        net.recv()
-        self.assertEqual(len(buf.buffer), len(data))
-        self.assertTrue(receiver in net.sockets)
-        self.assertTrue(receiver in net.receiving)
-        
-        #
-        # read
-        #
-        
-        self.assertEqual(net.receiving.pop(receiver), buf)
-        result = buf.read(msg.read)
-        self.assertEqual(msg.buffer, data)
-        self.assertTrue(isinstance(result, sockbuf.BufferDescriptor))
-        self.assertEqual(result.nbytes, 2)
-        self.assertEqual(result.who, (receiver, sender.bound))
-        net.free.add(buf)
+            self.writeread(net, sender, receiver)
+            self.assertEqual(msg.reading, data)
         
         # it should only take up to N events to close all sockets
         for i in xrange(len(socks)):
@@ -120,106 +112,96 @@ class TestCaseSockets(unittest.TestCase):
                 net.close()
             except StopIteration:
                 break
-
-    def test_stream(self,):
+                
+    def test_stream(self, NSOCKS=2):
         
         net = self.Network()
         
-        #
-        # listen
-        #
-        
-        listener = net.Socket(socket.STREAM)
-        listener.listen()
-        net.register()
-        
-        #
-        #  connect
-        #
-        
-        connector = net.Socket(socket.STREAM)
-        connector.connect(listener.bound)
-        
-        #
-        # accept
-        #
-
-        net.poll()
-        net.accept()
-        for acceptor in net.sockets:
-            if acceptor not in (listener, connector,):
-                break
-        else:
-            self.fail(net.sockets)
-        
-        #
-        # write
-        #
-
         buf = net.Buffer()
         self.assertTrue(buf in net.free)
         
         data = 'hi'
-        msg = Message('hi')
-        buf.write(msg.write, acceptor, len(data))
-        self.assertEqual(net.free.marking.pop(), buf)
-        net.sending.add(buf)
-        self.assertTrue(acceptor in net.sending)
 
-        #
-        # send
-        #
+        # listen
+        listener = net.Socket(socket.STREAM)
+        listener.listen()
 
-        for i in xrange(3):
-            if acceptor in net.poll.input:
-                break
-            net.register()
+        seen = set()
+        seen.add(listener)
+        for i in xrange(0, NSOCKS, 2):
+
+            if listener not in net.poll.input:
+                select = self.select(listener)
+                net.register(select=select)
             
-        for i in xrange(3):
-            if acceptor in net.poll.output:
-                break
+            connector = net.Socket(socket.STREAM)
+            seen.add(connector)
+            connector.connect(listener.bound)
+            
             net.poll()
+            net.accept()
+            new = set(net.sockets) - seen
+            self.assertEquals(len(new), 1)
+            acceptor = new.pop()
+            seen.add(acceptor)
+            
+            #
+            # callbacks
+            #
 
-        net.send()
-        self.assertTrue(buf in net.free)
-        self.assertTrue(acceptor in net.sockets)
-        
-        #
-        # receive
-        #
-        
-        for i in xrange(3):
-            if connector in net.poll.input:
-                break
-            net.register()
-        for i in xrange(3):
-            if connector in net.poll.output:
-                break
-            net.poll()
-        
-        net.recv()
-        self.assertEqual(len(buf.buffer), len(data))
-        self.assertTrue(connector in net.sockets)
-        self.assertTrue(connector in net.receiving)
-        
-        #
-        # read
-        #
-        
-        self.assertEqual(net.receiving.pop(connector), buf)
-        result = buf.read(msg.read)
-        self.assertEqual(msg.buffer, data)
-        self.assertTrue(isinstance(result, sockbuf.BufferDescriptor))
-        self.assertEqual(result.nbytes, 2)
-        self.assertEqual(result.who, connector)
-        net.free.add(buf)
+            msg = Message()
+            for cb, condition in ((msg.write(data, acceptor), net.writing,),
+                                  (msg.read(connector), net.reading,),):
+                next = cb.next()
+                consumer = Consumer(caller=cb, next=next)
+                condition.send(consumer)
+                self.assertTrue(consumer in condition.values())
+            
+            self.writeread(net, acceptor, connector)
+            self.assertEqual(msg.reading, data)
         
         # it should only take up to N events to close all sockets
-        for i in xrange(3):
+        for i in xrange(NSOCKS):
             try:
                 net.close()
             except StopIteration:
                 break
+    
+    def writeread(self, net, sender, receiver,):
+
+        # write
+
+        self.assertTrue(sender in net.writing)
+        select = self.select(sender)
+        net.write(select=select)
+        self.assertTrue(sender in net.sending)
+        
+        self.sendrecv(net, sender, receiver)
+        
+        # read
+
+        self.assertTrue(receiver in net.receiving)
+        self.assertTrue(receiver in net.reading)
+        select = self.select(receiver)
+        net.read(select=select)
+        
+    def sendrecv(self, net, sender, receiver,):
+
+        # send
+
+        select = self.select(sender)
+        if sender not in net.poll.input:
+            net.register(select=select)
+        net.poll(select=select)
+        net.send(select=select)
+
+        # receive
+
+        select = self.select(receiver)
+        if receiver not in net.poll.input:
+            net.register(select=select)
+        net.poll(select=select)
+        net.recv(select=select)
         
 #############################################################################
 #############################################################################

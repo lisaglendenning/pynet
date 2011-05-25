@@ -18,25 +18,23 @@ from ..io.poll import *
 class PollEvents(mapping.Mapping):
 
     @trellis.modifier
-    def send(self, item=None, items=None, **kwargs):
-        if item is not None:
-            self.update((item,),)
-        if items is not None:
-            self.update(items)
-    
-    @trellis.modifier
-    def update(self, iterable):
-        if isinstance(iterable, collections.Mapping):
-            iterable = iterable.iteritems()
+    def update(self, arg):
+        if isinstance(arg, tuple) and len(arg) == 2:
+            for i in arg:
+                if not isinstance(i, tuple):
+                    arg = (arg,)
+                    break
+        if isinstance(arg, collections.Mapping):
+            arg = arg.iteritems()
         marking = self.marking
-        for k,v in iterable:
+        for k,v in arg:
             for m in marking.to_change, marking.to_add, marking:
                 if k in m:
                     m[k] |= v
                     break
             else:
                 marking[k] = v
-
+        
     @trellis.modifier
     def pop(self, item,):
         if isinstance(item, tuple):
@@ -47,9 +45,9 @@ class PollEvents(mapping.Mapping):
             else:
                 self[k] = old & ~v
         else:
-            k = item
-            del self[k]
-        return item
+            v = self[item]
+            del self[item]
+        return v
     
 #############################################################################
 #############################################################################
@@ -110,7 +108,13 @@ class Polls(net.Transition, collections.MutableMapping,):
         removed = set(self.keys())
         for thunk in inputs:
             registry = thunk(*args, **kwargs)
-            for k,v in registry.iteritems():
+            if isinstance(registry, collections.Mapping):
+                items = registry.iteritems()
+            elif isinstance(registry, tuple) and len(registry) == 2:
+                items = (registry,)
+            else:
+                items = registry
+            for k,v in items:
                 if k in self:
                     removed.remove(k)
                     self[k] |= v

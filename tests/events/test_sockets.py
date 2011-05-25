@@ -22,13 +22,13 @@ class TestCaseSockets(unittest.TestCase):
     
     Network = SocketIO
     
-    def test_dgram(self, HOST='127.0.0.1', PORT=9000):
+    def test_dgram(self, PORT=9000):
         
         net = self.Network()
         sock = net.Socket(socket.DATAGRAM)
         self.assertTrue(sock in net.sockets)
         
-        sock.bind((HOST, PORT))
+        sock.bind(sock.Address(port=PORT))
         
         net.register()
         self.assertTrue(sock not in net.sockets)

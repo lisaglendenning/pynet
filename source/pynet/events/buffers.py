@@ -19,13 +19,20 @@ from . import polls, sockets, orderedset, dispatch, match
 #############################################################################
 #############################################################################
 
-class FreeBufferPool(sockets.FilteredPool):
+class FreeBufferPool(pool.Pool):
     r"""Default policy is MRU."""
     
     marking = trellis.make(orderedset.OrderedSet)
-    filter = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer) and len(x.buffer) == 0)
-               
-    def next(self, select=lambda m: itertools.imap(None, reversed(m))):
+    filter = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer))
+    
+    # flattens and filters input
+    def update(self, arg, **kwargs):
+        filter = self.filter
+        for item in sockets.flatten(arg, filter, **kwargs):
+            if len(item.buffer) == 0:
+                self.add(item)
+    
+    def next(self, select=lambda m: reversed(m)):
         marking = self.marking
         if not marking:
             return
@@ -35,53 +42,64 @@ class FreeBufferPool(sockets.FilteredPool):
 #############################################################################
 #############################################################################
 
-class Queues(mapping.Mapping):
+class ItemMapping(mapping.Mapping):
     
-    key = trellis.attr(None)
     filter = trellis.attr(None)
-
-    @trellis.modifier
-    def add(self, item,):
-        k = self.key(item)
-        if k in self.marking:
-            self.marking[k].append(item)
-        else:
-            q = collections.deque()
-            q.append(item)
-            self.marking[k] = q
-        
-    @trellis.modifier
-    def send(self, *args):
+    key = trellis.attr(None)
+    
+    # filter and flatten input
+    def update(self, *args):
         filter = self.filter
-        q = list(args)
-        while q:
-            item = q.pop(0)
-            if filter(item):
-                self.add(item)
-            elif isinstance(item, (tuple, list)):
-                q.extend(item)
+        add = self.__setitem__
+        key = self.key
+        for arg in args:
+            if filter(arg):
+                add(key(arg), arg)
+                continue
+            if isinstance(arg, collections.Mapping):
+                for k,v in arg.iteritems():
+                    if filter(v):
+                        add(k, v)
+                continue
+            if isinstance(arg, (tuple, list,)):
+                for v in arg:
+                    if filter(v):
+                        add(key(v), v)
+
+
+class BufferMapping(ItemMapping):
+
+    key = trellis.attr(lambda x: (x.log[0].connection.local if isinstance(x.log[0].connection, sockbuf.Connection) else x.log[0].connection) if x.log else None)
+    filter = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer) and x.log and len(x.buffer))
+
+Demand = collections.namedtuple('Demand', ('connection', 'nbytes',))
+    
+class Consumer(trellis.Component):
+    
+    caller = trellis.make(None)
+    next = trellis.attr(None)
+    
+    def read(self, buf):
+        caller = self.caller
+        demand = self.next
+        nbytes = demand.nbytes if isinstance(demand, Demand) else demand
+        desc = buf.read(caller.send, nbytes)
+        next = caller.send(desc)
+        self.next = next
         
-    @trellis.modifier
-    def pop(self, item,):
-        if isinstance(item, tuple):
-            k = item[0]
-        else:
-            k = item
-        if k not in self:
-            raise KeyError(k)
-        return self.marking[k].popleft()
+    def write(self, buf):
+        caller = self.caller
+        demand = self.next
+        who = demand.connection if isinstance(demand, Demand) else demand
+        nbytes = demand.nbytes if isinstance(demand, Demand) else demand
+        desc = buf.write(caller.send, who, nbytes)
+        next = caller.send(desc)
+        self.next = next
 
-class BufferQueues(Queues):
+class ConsumerMapping(ItemMapping):
 
-    key = trellis.attr(lambda x: (x.log[0].who[0] if isinstance(x.log[0].who, tuple) else x.log[0].who) if x.log else None)
-    filter = trellis.attr(lambda x: isinstance(x, sockbuf.SocketBuffer) and len(x.log) > 0)
-
-Callback = collections.namedtuple('Callback', ('sock', 'call', 'nbytes',))
-
-class CallbackQueues(Queues):
-
-    key = trellis.attr(lambda x: x.sock)
-    filter = trellis.attr(lambda x: isinstance(x, Callback))
+    key = trellis.attr(lambda x: (x.next.connection[0] if isinstance(x.next.connection, tuple) else x.next.connection) if isinstance(x.next, Demand) else x.next)
+    filter = trellis.attr(lambda x: isinstance(x, Consumer) and isinstance(x.next, Demand))
 
 
 #############################################################################
@@ -112,7 +130,9 @@ class Send(Muxed):
     
     @staticmethod
     def apply(inputs, **kwargs):
-        buf, sock = [i()[0] for i in inputs]
+        sending, polled = [i() for i in inputs]
+        sock = polled[0]
+        buf = sending[1]
         try:
             result = buf.send(**kwargs)
         except IOError as e:
@@ -131,18 +151,18 @@ class Send(Muxed):
         def polled(self):
             return self.transition.polled
         
-        def next(self, select=lambda m: itertools.imap(None, m.iteritems()),):
+        def next(self, select=lambda m: m.iteritems()):
             sending = self.sending
             polled = self.polled
             for input in sending.next(select=select):
-                sock = input.args[0][0][0] # lols
+                sock = input.args[0][0]
                 
                 # event filter
                 def filter(marking):
                     if sock in marking:
                         events = marking[sock]
                         if events & polls.POLLOUT:
-                            yield (sock,)
+                            yield sock
                 
                 for events in polled.next(select=filter):
                     yield input, events
@@ -158,7 +178,12 @@ class Recv(Muxed):
     
     @staticmethod
     def apply(inputs, **kwargs):
-        sock, buf = [i()[0] for i in inputs]
+        polled, receiving = [i() for i in inputs]
+        sock = polled[0]
+        if not isinstance(receiving, sockbuf.SocketBuffer):
+            buf = receiving[1]
+        else:
+            buf = receiving
         try:
             result = buf.recv(sock, **kwargs)
         except IOError as e:
@@ -185,7 +210,7 @@ class Recv(Muxed):
         def select(marking):
             for k,v in marking.iteritems():
                 if v & polls.POLLOUT:
-                    yield (k,)
+                    yield k
     
         def pick_buffer(self, sock):
             # pick one buffer
@@ -193,13 +218,15 @@ class Recv(Muxed):
                 if sock in m:
                     buf = m[sock]
                     if buf.buffer.free:
-                        yield ((sock, buf,),)
-            receiving = self.receiving
-            for buf in receiving.next(select=filter):
-                return buf
-            free = self.free
-            for buf in free.next():
-                return buf
+                        yield (sock, buf,)
+            for buffers in (self.receiving.next(select=filter),
+                            self.free.next(),):
+                for event in buffers:
+                    buf = event.args[0]
+                    if not isinstance(buf, sockbuf.SocketBuffer):
+                        buf = buf[1]
+                    if buf.buffer.free:
+                        return event
             return None
     
         def next(self, select=None):
@@ -208,115 +235,120 @@ class Recv(Muxed):
                 select = self.select
             # for each socket with an input event, pick one buffer
             for input in polled.next(select=select):
-                sock = input.args[0][0]
+                sock = input.args[0]
                 buf = self.pick_buffer(sock)
                 if buf is not None:
-                    yield (input, buf)
+                    yield input, buf
 
 #############################################################################
 #############################################################################
 
-#class ToRead(operators.Multiplexer):
-#
-#    received = trellis.attr(None)
-#    readers = trellis.attr(None)
-#
-#    def next(self, iterator=None, *args, **kwargs):
-#        # Input events
-#        itr = self.received.next(*args, **kwargs)
-#        try:
-#            received = itr.next()
-#        except StopIteration:
-#            return
-#        itr = self.readers.next(*args, **kwargs)
-#        try:
-#            readers = itr.next()
-#        except StopIteration:
-#            return
-#        
-#        # anything to read?
-#        qs = received.keywords['items']
-#        cbs = readers.keywords['items']
-#        if iterator is None:
-#            iterator = qs
-#        else:
-#            iterator = itertools.ifilter(lambda x: x in qs, iterator(qs))
-#        for sock in iterator:
-#            if sock in cbs:
-#                cb = cbs[sock]
-#                buf = qs[sock]
-#                if cb.demand <= buf.log[0].nbytes:
-#                    inputs = (received.__class__(received.func, item=sock),
-#                              readers.__class__(readers.func, item=sock),)
-#                    yield inputs
-#            
-#class ToWrite(operators.Multiplexer):
-#
-#    free = trellis.attr(None)
-#    sending = trellis.attr(None)
-#    writers = trellis.attr(None)
-#    
-#    def find_buffer(self, who, demand):
-#        sending = self.sending
-#        filter = lambda k: k == who
-#        for event in sending.next(select=filter):
-#        free = self.free
-#
-#    def next(self, *args, **kwargs):
-#        itr = self.sending.next(*args, **kwargs)
-#        try:
-#            sending = itr.next()
-#        except StopIteration:
-#            sending = None
-#        itr = self.free.next(*args, **kwargs)
-#        try:
-#            free = itr.next()
-#        except StopIteration:
-#            free = None
-#        if sending is None and free is None: # no available buffers
-#            return
-#        writers = self.writers
-#        for writer in writers.next(*args, **kwargs):
-#            who = writer.args[0]
-#            
-#            for buf
-#            
-#            if sending is not None and who in sending:
-#                available =  
-#        # anything to read?
-#        qs = received.keywords['items']
-#        cbs = readers.keywords['items']
-#        if iterator is None:
-#            iterator = qs
-#        else:
-#            iterator = itertools.ifilter(lambda x: x in qs, iterator(qs))
-#        for writer in iterator:
-#            if sock in cbs:
-#                cb = cbs[sock]
-#                buf = qs[sock]
-#                if cb.demand <= buf.log[0].nbytes:
-#                    inputs = (received.__class__(received.func, item=sock),
-#                              readers.__class__(readers.func, item=sock),)
-#                    yield inputs
-#                    
-#class Read(net.Transition):
-#
-#    @staticmethod
-#    def reads(inputs, **kwargs):
-#        buf, reader = [i() for i in inputs]
-#        result = reader.call(buf, **kwargs)
-#        return result, buf
-#    
-#    def __init__(self, *args, **kwargs):
-#        k = 'mux'
-#        if k not in kwargs:
-#            mux = ToRead()
-#            kwargs[k] = mux
-#        k = 'pipe'
-#        if k not in kwargs:
-#            pipe = operators.Apply(fn=self.reads)
-#            kwargs[k] = pipe
-#        super(Recv, self).__init__(*args, **kwargs)
+class Write(Muxed):
+    
+    sending = trellis.attr(None)
+    free = trellis.attr(None)
+    writing = trellis.attr(None)
+    
+    @staticmethod
+    def apply(inputs, **kwargs):
+        writing, sending = [i() for i in inputs]
+        consumer = writing[1]
+        if not isinstance(sending, sockbuf.SocketBuffer):
+            buf = sending[1]
+        else:
+            buf = sending
+        consumer.write(buf, **kwargs)
+        return consumer, buf
+
+    class Mux(operators.Multiplexer):
+    
+        transition = trellis.attr(None)
+        
+        @trellis.compute
+        def sending(self):
+            return self.transition.sending
+            
+        @trellis.compute
+        def free(self):
+            return self.transition.free
+        
+        @trellis.compute
+        def writing(self):
+            return self.transition.writing
+        
+        def pick_buffer(self, connection, nbytes):
+            # pick one buffer
+            def filter(m):
+                if isinstance(connection, sockbuf.Connection):
+                    sock = connection.local
+                else:
+                    sock = connection
+                if sock in m:
+                    buf = m[sock]
+                    yield (sock, buf,)
+            for buffers in (self.sending.next(select=filter),
+                            self.free.next(),):
+                for event in buffers:
+                    buf = event.args[0]
+                    if not isinstance(buf, sockbuf.SocketBuffer):
+                        buf = buf[1]
+                    if buf.buffer.free >= nbytes:
+                        return event
+            return None
+        
+        def next(self, select=lambda m: m.iteritems()):
+            # iterate on waiting writers
+            writing = self.writing
+            for input in writing.next(select=select):
+                consumer = input.args[0][1]
+                if isinstance(consumer.next, Demand):
+                    who = consumer.next.connection
+                    nbytes = consumer.next.nbytes
+                    buf = self.pick_buffer(who, nbytes)
+                    if buf is not None:
+                        yield (input, buf,)
+
+#############################################################################
+#############################################################################
+
+class Read(Muxed):
+    
+    receiving = trellis.attr(None)
+    reading = trellis.attr(None)
+    
+    @staticmethod
+    def apply(inputs, **kwargs):
+        buf, consumer = [i()[1] for i in inputs]
+        consumer.read(buf, **kwargs)
+        return consumer, buf
+
+    class Mux(operators.Multiplexer):
+    
+        transition = trellis.attr(None)
+        
+        @trellis.compute
+        def receiving(self):
+            return self.transition.receiving
+        
+        @trellis.compute
+        def reading(self):
+            return self.transition.reading
+        
+        def next(self, select=lambda m: m.iteritems()):
+            # iterate on readable buffers
+            receiving = self.receiving
+            reading = self.reading
+            for received in receiving.next(select=select):
+                sock, buf = received.args[0]
+                def filter(m):
+                    if sock in m:
+                        consumer = m[sock]
+                        if isinstance(consumer.next, Demand):
+                            if buf.log[0].nbytes >= consumer.next.nbytes:
+                                yield (sock, consumer,)
+                for reader in reading.next(select=filter):
+                    yield received, reader
+
         
 #############################################################################
 #############################################################################
@@ -344,16 +376,26 @@ class SocketBufferIO(sockets.Network):
         condition = self.Condition(self.free)
         return condition
     
-    @trellis.maintain(make=BufferQueues)
+    @trellis.maintain(make=BufferMapping)
     def sending(self):
         condition = self.Condition(self.sending)
         return condition
         
-    @trellis.maintain(make=BufferQueues)
+    @trellis.maintain(make=BufferMapping)
     def receiving(self):
         condition = self.Condition(self.receiving)
         return condition
 
+    @trellis.maintain(make=ConsumerMapping)
+    def writing(self):
+        condition = self.Condition(self.writing)
+        return condition
+    
+    @trellis.maintain(make=ConsumerMapping)
+    def reading(self):
+        condition = self.Condition(self.reading)
+        return condition
+    
     @trellis.maintain(make=Send)
     def send(self):
         transition = self.Transition(self.send)
@@ -377,8 +419,28 @@ class SocketBufferIO(sockets.Network):
                     setattr(transition, attr, input)
         return transition
     
-#    read = trellis.make(Read)
-#    write = trellis.make(Write)
+    @trellis.maintain(make=Write)
+    def write(self):
+        transition = self.Transition(self.write)
+        for input in transition.inputs:
+            input = input.input
+            for attr, condition in (('free', self.free,),
+                                    ('sending', self.sending,),
+                                    ('writing', self.writing,)):
+                if input is condition and input is not getattr(transition, attr):
+                    setattr(transition, attr, input)
+        return transition
+    
+    @trellis.maintain(make=Read)
+    def read(self):
+        transition = self.Transition(self.read)
+        for input in transition.inputs:
+            input = input.input
+            for attr, condition in (('reading', self.reading,),
+                                    ('receiving', self.receiving,),):
+                if input is condition and input is not getattr(transition, attr):
+                    setattr(transition, attr, input)
+        return transition
     
     def __init__(self, *args, **kwargs):
         super(SocketBufferIO, self).__init__(*args, **kwargs)
@@ -407,25 +469,25 @@ class SocketBufferIO(sockets.Network):
             arc = self.Arc()
             net.link(arc, transition, output,)
     
-#        transition = self.read
-#        inputs = ('received', self.received,),
-#        for attr, input in inputs:
-#            arc = self.Arc()
-#            net.link(arc, input, transition,)
-#        outputs = self.received, self.free
-#        for output in outputs:
-#            arc = self.Arc()
-#            net.link(arc, transition, output,)
-#            
-#        transition = self.write
-#        inputs = ('sending', self.sending,), ('free', self.free,)
-#        for attr, input in inputs:
-#            arc = self.Arc()
-#            net.link(arc, input, transition,)
-#        outputs = self.sending, self.free
-#        for output in outputs:
-#            arc = self.Arc()
-#            net.link(arc, transition, output,)
+        transition = self.read
+        inputs = self.receiving, self.reading,
+        for input in inputs:
+            arc = self.Arc()
+            net.link(arc, input, transition,)
+        outputs = self.receiving, self.free, self.reading,
+        for output in outputs:
+            arc = self.Arc()
+            net.link(arc, transition, output,)
+          
+        transition = self.write
+        inputs = self.sending, self.free, self.writing,
+        for input in inputs:
+            arc = self.Arc()
+            net.link(arc, input, transition,)
+        outputs = inputs
+        for output in outputs:
+            arc = self.Arc()
+            net.link(arc, transition, output,)
             
 #############################################################################
 #############################################################################
