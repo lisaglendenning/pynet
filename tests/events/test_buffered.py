@@ -15,7 +15,7 @@ import unittest
 
 import collections
 
-from pynet.events.buffers import *
+from pynet.events.buffered import *
 
 #############################################################################
 #############################################################################
@@ -90,21 +90,27 @@ class TestCaseSockets(unittest.TestCase):
             
             receiver, sender = socks[i:i+2]
             
-            #
-            # callbacks
-            #
-            
+            # write
             connection = sockbuf.Connection(sender, receiver.bound)
-            msg = Message()
-            for cb, condition in ((msg.write(data, connection), net.writing,),
-                                  (msg.read(receiver), net.reading,),):
-                next = cb.next()
-                consumer = Consumer(caller=cb, next=next)
-                condition.send(consumer)
-                self.assertTrue(consumer in condition.values())
+            buf = net.free.pull(buf)
+            nbytes = len(data)
+            def writer(buf):
+                buf[:nbytes] = data
+                return nbytes
+            buf.write(writer, connection, nbytes)
+            net.sending.send((sender, buf))
+            self.assertTrue(sender in net.sending)
 
-            self.writeread(net, sender, receiver)
-            self.assertEqual(msg.reading, data)
+            self.sendrecv(net, sender, receiver)
+            
+            # read
+            self.assertTrue(receiver in net.receiving)
+            buf = net.receiving.pull(receiver)[1]
+            def reader(buf):
+                self.assertEqual(buf[:nbytes], data)
+                return nbytes
+            buf.read(reader, nbytes)
+            net.free.send(buf)
         
         # it should only take up to N events to close all sockets
         for i in xrange(len(socks)):
@@ -149,16 +155,28 @@ class TestCaseSockets(unittest.TestCase):
             # callbacks
             #
 
-            msg = Message()
-            for cb, condition in ((msg.write(data, acceptor), net.writing,),
-                                  (msg.read(connector), net.reading,),):
-                next = cb.next()
-                consumer = Consumer(caller=cb, next=next)
-                condition.send(consumer)
-                self.assertTrue(consumer in condition.values())
+            # write
+            connection = acceptor
+            buf = net.free.pull(buf)
+            nbytes = len(data)
+            def writer(buf):
+                buf[:nbytes] = data
+                return nbytes
+            buf.write(writer, connection, nbytes)
+            net.sending.send((connection, buf))
+            self.assertTrue(connection in net.sending)
             
-            self.writeread(net, acceptor, connector)
-            self.assertEqual(msg.reading, data)
+            self.sendrecv(net, acceptor, connector)
+            
+            # read
+            connection = connector
+            self.assertTrue(connection in net.receiving)
+            buf = net.receiving.pull(connection)[1]
+            def reader(buf):
+                self.assertEqual(buf[:nbytes], data)
+                return nbytes
+            buf.read(reader, nbytes)
+            net.free.send(buf)
         
         # it should only take up to N events to close all sockets
         for i in xrange(NSOCKS):
@@ -166,25 +184,7 @@ class TestCaseSockets(unittest.TestCase):
                 net.close()
             except StopIteration:
                 break
-    
-    def writeread(self, net, sender, receiver,):
 
-        # write
-
-        self.assertTrue(sender in net.writing)
-        select = self.select(sender)
-        net.write(select=select)
-        self.assertTrue(sender in net.sending)
-        
-        self.sendrecv(net, sender, receiver)
-        
-        # read
-
-        self.assertTrue(receiver in net.receiving)
-        self.assertTrue(receiver in net.reading)
-        select = self.select(receiver)
-        net.read(select=select)
-        
     def sendrecv(self, net, sender, receiver,):
 
         # send

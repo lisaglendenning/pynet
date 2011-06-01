@@ -20,7 +20,7 @@ from pynet.events.sockets import *
 
 class TestCaseSockets(unittest.TestCase):
     
-    Network = SocketIO
+    Network = Network
     
     def test_dgram(self, PORT=9000):
         

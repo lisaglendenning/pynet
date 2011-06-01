@@ -4,7 +4,6 @@
 from __future__ import absolute_import
 
 import itertools
-import collections
 
 from peak.events import trellis
 
@@ -42,26 +41,13 @@ def flatten(arg, filter=None, types=(list, tuple,)):
 #############################################################################
 #############################################################################
 
-class FilteredPool(pool.Pool):
-    
-    filter = trellis.attr(None)
-    
-    # flattens and filters input
-    def update(self, arg, **kwargs):
-        filter = self.filter
-        for item in flatten(arg, filter, **kwargs):
-            self.add(item)
-
-#############################################################################
-#############################################################################
-
-class SocketPolling(polls.Network):
+class Polling(polls.Network):
     
     input = trellis.make(lambda self: self.Condition())
     output = trellis.make(lambda self: self.Condition())
     
     def __init__(self, *args, **kwargs):
-        super(SocketPolling, self).__init__(*args, **kwargs)
+        super(Polling, self).__init__(*args, **kwargs)
         for pair in ((self.input, self.poll), (self.poll, self.output,)):
             arc = self.Arc()
             net.link(arc, *pair)
@@ -213,12 +199,37 @@ class Close(SelectTransition):
 #############################################################################
 #############################################################################
 
-class SocketIO(net.Network):
+class Sockets(net.Network):
     
+    @trellis.modifier
+    def Arc(self, source, sink, arc=None):
+        if arc is None:
+            if sink is self.sockets:
+                filter = lambda x: isinstance(x, socket.Socket)
+                def fn(m):
+                    for item in flatten(m, filter=filter):
+                        yield item
+                arc = operators.FilterOut(fn=fn)
+                self.arcs.add(arc)
+            else:
+                arc = super(Sockets, self).Arc()
+        else:
+            if arc not in self.arcs:
+                self.arcs.add(arc)
+        net.link(arc, source, sink)
+        return arc
+    
+    @trellis.modifier
     def Transition(self, transition):
         if transition not in self.transitions:
             self.transitions.add(transition)
         return transition
+
+    @trellis.modifier
+    def Condition(self, condition):
+        if condition not in self.conditions:
+            self.conditions.add(condition)
+        return condition
 
     @trellis.modifier
     def Socket(self, *args, **kwargs):
@@ -226,14 +237,11 @@ class SocketIO(net.Network):
         self.sockets.add(sock)
         return sock
     
-    @trellis.modifier
-    def Sockets(self):
-        condition = FilteredPool(filter=lambda x: isinstance(x, socket.Socket))
-        self.conditions.add(condition)
-        return condition
+    poll = trellis.make(Polling)
     
-    poll = trellis.make(SocketPolling)
-    sockets = trellis.make(Sockets)
+    @trellis.maintain(make=pool.Pool)
+    def sockets(self):
+        return self.Condition(self.sockets)
 
     @trellis.maintain(make=Register)
     def register(self):
@@ -252,7 +260,7 @@ class SocketIO(net.Network):
         return self.Transition(self.close)
     
     def __init__(self, *args, **kwargs):
-        super(SocketIO, self).__init__(*args, **kwargs)
+        super(Sockets, self).__init__(*args, **kwargs)
         
         #
         # links
@@ -262,29 +270,25 @@ class SocketIO(net.Network):
         for pair in ((self.poll.output, transition,),
                      (self.sockets, transition,), 
                      (transition, self.poll.input,),):
-            arc = self.Arc()
-            net.link(arc, *pair)
+            self.Arc(*pair)
 
         transition = self.accept
         for pair in ((self.poll.output, transition,),
                      (transition, self.sockets,),):
-            arc = self.Arc()
-            net.link(arc, *pair)
+            self.Arc(*pair)
         
         for transition in (self.close, self.shutdown,):
             outputs = (self.sockets,)
             inputs = (self.sockets, self.poll.input, self.poll.output,)
             for input in inputs:
-                arc = self.Arc()
-                net.link(arc, input, transition)
+                self.Arc(input, transition)
             for output in outputs:
-                arc = self.Arc()
-                net.link(arc, transition, output)
+                self.Arc(transition, output)
 
 #############################################################################
 #############################################################################
 
-Network = SocketIO
+Network = Sockets
 
 #############################################################################
 #############################################################################

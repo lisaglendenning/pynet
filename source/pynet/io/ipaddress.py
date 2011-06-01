@@ -26,7 +26,7 @@ class IPAddress(tuple):
     
     FAMILY = socket.AF_INET
     
-    LOCALHOST = '0.0.0.0'
+    LOCALHOST = '127.0.0.1'
 
     @classmethod
     def from_string(cls, text):
