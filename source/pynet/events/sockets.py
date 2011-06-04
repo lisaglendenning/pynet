@@ -8,7 +8,7 @@ import itertools
 from peak.events import trellis
 
 from pypetri import net
-from pypetri.collections import pool, operators
+from pypetri.collections import pool
 
 from ..io import socket
 from . import polls
@@ -75,9 +75,9 @@ class SelectTransition(net.Transition):
     def __init__(self, *args, **kwargs):
         k = 'pipe'
         if k not in kwargs:
-            pipe = operators.Pipeline(operators.Iter(),
-                                      operators.Call(),
-                                      operators.Apply(fn=self.apply),)
+            pipe = net.Pipeline(net.Iter(),
+                                      net.Call(),
+                                      net.Apply(fn=self.apply),)
             kwargs[k] = pipe
         super(SelectTransition, self).__init__(*args, **kwargs)
     
@@ -209,7 +209,7 @@ class Sockets(net.Network):
                 def fn(m):
                     for item in flatten(m, filter=filter):
                         yield item
-                arc = operators.FilterOut(fn=fn)
+                arc = net.FilterOut(fn=fn)
                 self.arcs.add(arc)
             else:
                 arc = super(Sockets, self).Arc()

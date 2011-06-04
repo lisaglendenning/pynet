@@ -12,7 +12,7 @@ History
 
 from __future__ import absolute_import
 
-import unittest, socket, time
+import unittest
 
 from pynet.io.serialize import serialstring, serialpickle, serialjson
 

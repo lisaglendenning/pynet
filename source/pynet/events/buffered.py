@@ -8,7 +8,7 @@ import collections
 from peak.events import trellis
 
 from pypetri import net
-from pypetri.collections import collection, pool, mapping, operators
+from pypetri.collections import collection, pool, mapping
 
 from ..io import buffer, socket, sockbuf
 
@@ -37,7 +37,7 @@ class FreeBufferPool(pool.Pool, collections.Sequence):
         def fn(m):
             for item in sockets.flatten(m, filter=filter):
                 yield item
-        arc = operators.FilterOut(fn=fn)
+        arc = net.FilterOut(fn=fn)
         return arc
     
     def next(self, select=lambda m: reversed(m)):
@@ -63,7 +63,7 @@ class MappedPool(mapping.Mapping):
             for item in sockets.flatten(m, filter=filter):
                 k = key(item)
                 yield k, item
-        arc = operators.FilterOut(fn=fn)
+        arc = net.FilterOut(fn=fn)
         return arc
 
 #############################################################################
@@ -90,7 +90,7 @@ class Send(Muxed):
     sending = trellis.attr(None)
     polled = trellis.attr(None)
 
-    class Pipe(operators.Pipe):
+    class Pipe(net.Pipe):
         
         def send(self, sock, buf, **kwargs):
             try:
@@ -100,7 +100,7 @@ class Send(Muxed):
             output = result, sock, buf
             self.output.send(output, **kwargs)
 
-    class Mux(operators.Multiplexer):
+    class Mux(net.Multiplexer):
     
         transition = trellis.attr(None)
         
@@ -145,7 +145,7 @@ class Recv(Muxed):
     receiving = trellis.attr(None)
     polled = trellis.attr(None)
     
-    class Pipe(operators.Pipe):
+    class Pipe(net.Pipe):
 
         def send(self, sock, buf, **kwargs):
             try:
@@ -155,7 +155,7 @@ class Recv(Muxed):
             output = result, sock, buf
             self.output.send(output, **kwargs)
 
-    class Mux(operators.Multiplexer):
+    class Mux(net.Multiplexer):
     
         transition = trellis.attr(None)
         

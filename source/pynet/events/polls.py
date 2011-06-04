@@ -8,7 +8,7 @@ import collections
 from peak.events import trellis
 
 from pypetri import net
-from pypetri.collections import mapping, operators
+from pypetri.collections import mapping
 
 from ..io.poll import *
 
@@ -59,8 +59,8 @@ class Polls(net.Transition, collections.MutableMapping,):
     def __init__(self, *args, **kwargs):
         k = 'pipe'
         if k not in kwargs:
-            pipe = operators.Pipeline(operators.Apply(fn=self.poll),
-                                      operators.Iter(),)
+            pipe = net.Pipeline(net.Apply(fn=self.poll),
+                                      net.Iter(),)
             kwargs[k] = pipe
         super(Polls, self).__init__(*args, **kwargs)
 

@@ -8,7 +8,6 @@ import collections
 from peak.events import trellis
 
 from pypetri import net
-from pypetri.collections import operators
 
 from ..io import sockbuf, socket
 from . import buffered
@@ -110,7 +109,7 @@ class Write(buffered.Muxed):
         consumer = Consumer(caller=caller, connection=connection, nbytes=None)
         return consumer
         
-    class Pipe(operators.Pipe):
+    class Pipe(net.Pipe):
         def send(self, consumer, output, **kwargs):
             if isinstance(output, sockbuf.SocketBuffer):
                 next = consumer.write(output)
@@ -119,7 +118,7 @@ class Write(buffered.Muxed):
                 output = consumer.send(output)
             self.output.send(output, **kwargs)
 
-    class Mux(operators.Multiplexer):
+    class Mux(net.Multiplexer):
     
         transition = trellis.attr(None)
         
@@ -215,7 +214,7 @@ class Read(buffered.Muxed):
         consumer = Consumer(connection=connection, caller=caller, nbytes=None)
         return consumer
         
-    class Pipe(operators.Pipe):
+    class Pipe(net.Pipe):
         def send(self, consumer, buf=None, **kwargs):
             if buf is None:
                 output = consumer.next()
@@ -224,7 +223,7 @@ class Read(buffered.Muxed):
                 output = next, buf
             self.output.send(output, **kwargs)
     
-    class Mux(operators.Multiplexer):
+    class Mux(net.Multiplexer):
     
         transition = trellis.attr(None)
         
